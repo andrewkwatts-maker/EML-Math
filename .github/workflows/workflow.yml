@@ -11,7 +11,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # Build for all major platforms to cover the EML user base
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
@@ -20,22 +19,16 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
         env:
-          # Target modern Python versions (3.10 through 3.13)
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
-          
-          # Use manylinux2014 for maximum Linux compatibility
+          # Targets Python 3.11, 3.12, and 3.13
+          CIBW_BUILD: "cp311-* cp312-* cp313-*"
+          # This converts linux_x86_64 into the accepted manylinux tag
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
-          
-          # Install Rust inside the build containers (Required for Maturin/eml_core)
+          # Ensures Rust is available inside the build container
           CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y"
           CIBW_ENVIRONMENT: PATH="$PATH:$HOME/.cargo/bin"
-          
-          # Skip 32-bit builds to speed up the pipeline
-          CIBW_SKIP: "*-win32 *_i686"
 
       - uses: actions/upload-artifact@v4
         with:
-          # Unique names for each matrix job to avoid collisions
           name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
           path: ./wheelhouse/*.whl
 

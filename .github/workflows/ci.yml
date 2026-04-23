@@ -33,7 +33,7 @@ jobs:
         
       - name: Install library with dev deps
         # This will now trigger the Rust compilation automatically
-        run: pip install -e ".[dev]"
+        run: pip install .[dev]
 
       - name: Run tests
         run: pytest tests/ -v --tb=short -m "not slow and not gemini"
