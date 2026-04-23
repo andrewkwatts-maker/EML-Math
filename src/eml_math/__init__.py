@@ -43,7 +43,7 @@ from eml_math.constants import (
 )
 
 from eml_math.point import EMLPoint, _VarNode
-from eml_math.state import EMLState, EMLKnot
+from eml_math.state import EMLState
 from eml_math.pair import EMLPair
 from eml_math.simulation import (
     simulate_pulses,
