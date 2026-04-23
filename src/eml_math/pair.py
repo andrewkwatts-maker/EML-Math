@@ -17,8 +17,8 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from eml_math.point import EMLPoint, TensionPoint
-from eml_math.state import EMLState, TensionKnot
+from eml_math.point import EMLPoint
+from eml_math.state import EMLState
 import eml_math.operators as ops
 
 
