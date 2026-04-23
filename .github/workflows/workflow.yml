@@ -19,13 +19,13 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.21.3
         env:
-          # Targets Python 3.11, 3.12, and 3.13
           CIBW_BUILD: "cp311-* cp312-* cp313-*"
-          # This converts linux_x86_64 into the accepted manylinux tag
+          # This line forces the use of the manylinux image
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
-          # Ensures Rust is available inside the build container
+          # Injects Rust into the build environment
           CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y"
           CIBW_ENVIRONMENT: PATH="$PATH:$HOME/.cargo/bin"
+          CIBW_SKIP: "*-win32 *_i686"
 
       - uses: actions/upload-artifact@v4
         with:

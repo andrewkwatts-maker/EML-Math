@@ -7,6 +7,8 @@ Based on the work by Andrzej Odrzywołek in the below paper
 https://arxiv.org/html/2603.21852v2
 which is supplied under https://creativecommons.org/licenses/by/4.0/
 
+you may find that another pypi library I found on the same topic is more useful for your tasks https://pypi.org/project/eml-sr/
+
 ---
 
 ## The Core Idea
