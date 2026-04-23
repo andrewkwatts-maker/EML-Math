@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "eml-math"
-version = "v0.2.0-alpha"
+version = "v0.4.0a0"
 description = "Mirror Phase Mathematics: the EML Sheffer operator as a universal real-valued foundation for all elementary mathematics"
 readme = "README.md"
 license = { file = "LICENSE" }
