@@ -1,3 +1,4 @@
+
 name: Publish to PyPI
 
 on:
@@ -5,33 +6,69 @@ on:
     types: [published]
 
 jobs:
-  build:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Build for all major platforms to cover the EML user base
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          # Target modern Python versions (3.10 through 3.13)
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          
+          # Use manylinux2014 for maximum Linux compatibility
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          
+          # Install Rust inside the build containers (Required for Maturin/eml_core)
+          CIBW_BEFORE_ALL_LINUX: "curl https://sh.rustup.rs -sSf | sh -s -- -y"
+          CIBW_ENVIRONMENT: PATH="$PATH:$HOME/.cargo/bin"
+          
+          # Skip 32-bit builds to speed up the pipeline
+          CIBW_SKIP: "*-win32 *_i686"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          # Unique names for each matrix job to avoid collisions
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build source distribution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Install build tools
-        run: pip install build
-      - name: Build package
-        run: python -m build
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: cibw-sdist
+          path: dist/*.tar.gz
 
   publish:
-    needs: build
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write
+      id-token: write  # Mandatory for Trusted Publishing
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+          path: dist
+          pattern: cibw-*
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
