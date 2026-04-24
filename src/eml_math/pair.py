@@ -202,6 +202,22 @@ class EMLPair:
         """Zero as a EMLPair."""
         return _pair_from_values(0.0, 0.0, D)
 
+    def frames(self) -> "list[EMLPair]":
+        """
+        Return all 4 cardinal frames of this pair.
+        Multiplying by {1, i, -1, -i} gives the 4 rotations.
+        The Euclidean modulus is identical in all frames.
+        """
+        r = self.real_tension
+        im = self.imag_tension
+        D = self._real.point.D
+        return [
+            EMLPair.from_values(r, im),      # frame 0: x 1
+            EMLPair.from_values(-im, r),     # frame 1: x i
+            EMLPair.from_values(-r, -im),    # frame 2: x -1
+            EMLPair.from_values(im, -r),     # frame 3: x -i
+        ]
+
     # ── dunder ────────────────────────────────────────────────────────────────
 
     def __repr__(self) -> str:

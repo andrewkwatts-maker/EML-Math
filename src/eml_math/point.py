@@ -23,6 +23,12 @@ from typing import Optional, Union
 
 from eml_math.constants import OVERFLOW_THRESHOLD, PLANCK_D
 
+try:
+    from eml_math import eml_core as _core
+    _RUST_POINT = True
+except ImportError:
+    _RUST_POINT = False
+
 _Coord = Union[float, "EMLPoint"]
 
 
@@ -262,6 +268,219 @@ class EMLPoint:
             Name of the variable (must match a _VarNode leaf in the tree).
         """
         return _diff_node(self, var)
+
+    # ── geometric / relativistic extensions ──────────────────────────────────
+
+    def pair(self) -> "EMLPair":
+        """Returns (exp(x), ln(|y|)) as an EMLPair — the canonical frame coordinates."""
+        from eml_math.pair import EMLPair
+        xv = self.x
+        yv = self.y
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        return EMLPair.from_values(math.exp(xv), math.log(y_safe))
+
+    def euclidean_delta(self) -> float:
+        """sqrt(exp(2x) + (ln y)^2) — Euclidean distance invariant under 4-frame rotations."""
+        if _RUST_POINT and self.is_leaf():
+            return _core.EMLPoint(self.x, self.y).euclidean_delta()
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        ex = math.exp(xv)
+        ly = math.log(y_safe)
+        return math.sqrt(ex * ex + ly * ly)
+
+    def minkowski_delta(self, signature: str = "+---", c: float = 1.0) -> float:
+        """
+        Minkowski invariant interval sqrt(|exp(2x) - (c*ln y)^2|).
+        signature '+---': time-like when exp(2x) > (c*ln y)^2.
+        signature '-+++': space-like convention.
+        """
+        if _RUST_POINT and self.is_leaf():
+            plus_sig = signature.startswith("+")
+            return _core.EMLPoint(self.x, self.y).minkowski_delta(plus_sig, c)
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        t_comp = math.exp(xv)
+        x_comp = c * math.log(y_safe)
+        if signature.startswith("+"):
+            ds2 = t_comp * t_comp - x_comp * x_comp
+        else:
+            ds2 = x_comp * x_comp - t_comp * t_comp
+        return math.sqrt(abs(ds2))
+
+    def is_timelike(self, c: float = 1.0) -> bool:
+        """True when exp(2x) > (c * ln y)^2 in (+---) signature."""
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        return math.exp(xv) ** 2 > (c * math.log(y_safe)) ** 2
+
+    def is_spacelike(self, c: float = 1.0) -> bool:
+        """True when exp(2x) < (c * ln y)^2 in (+---) signature."""
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        return math.exp(xv) ** 2 < (c * math.log(y_safe)) ** 2
+
+    def is_lightlike(self, c: float = 1.0, tol: float = 1e-9) -> bool:
+        """True when |exp(2x) - (c * ln y)^2| < tol."""
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        return abs(math.exp(xv) ** 2 - (c * math.log(y_safe)) ** 2) < tol
+
+    def canonical_frame(self, k: int = 0) -> "EMLPair":
+        """
+        Rotate pair through frame k in {0,1,2,3} by multiplying by {1, i, -1, -i}.
+        Frame 0: (exp(x),  ln(y))   identity
+        Frame 1: (-ln(y),  exp(x))  x i
+        Frame 2: (-exp(x), -ln(y))  x -1
+        Frame 3: (ln(y),  -exp(x))  x -i
+        The Euclidean delta is invariant across all frames.
+        """
+        from eml_math.pair import EMLPair
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        r = math.exp(xv)
+        im = math.log(y_safe)
+        k = k % 4
+        if k == 0:
+            return EMLPair.from_values(r, im)
+        elif k == 1:
+            return EMLPair.from_values(-im, r)
+        elif k == 2:
+            return EMLPair.from_values(-r, -im)
+        else:
+            return EMLPair.from_values(im, -r)
+
+    def rapidity(self) -> float:
+        """
+        Extract rapidity phi = atanh(ln(y) / exp(x)) from pair coordinates.
+        Raises ValueError for spacelike points where |ln(y)| >= |exp(x)|.
+        """
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        t_comp = math.exp(xv)
+        x_comp = math.log(y_safe)
+        if abs(t_comp) < 1e-300:
+            raise ValueError("Cannot compute rapidity: time component is zero")
+        ratio = x_comp / t_comp
+        if abs(ratio) >= 1.0:
+            raise ValueError(
+                f"Cannot compute rapidity: |space/time| = {abs(ratio):.6g} >= 1 (point is not timelike)"
+            )
+        return math.atanh(ratio)
+
+    def boost(self, phi: float, c: float = 1.0, pure_eml: bool = False) -> "EMLPoint":
+        """
+        Apply a Lorentz boost by rapidity phi, returning a new EMLPoint with identical Δ_M.
+        Boost matrix: t' = t*cosh(phi) - (x/c)*sinh(phi)
+                      x' = x*cosh(phi) - t*c*sinh(phi)
+        where t = exp(x_coord), x = ln(y_coord).
+        pure_eml=True is reserved for future symbolic rewriting (currently ignored).
+        """
+        if _RUST_POINT and self.is_leaf():
+            rust_result = _core.EMLPoint(self.x, self.y).boost(phi, c)
+            return EMLPoint(rust_result.x, rust_result.y, D=self._D)
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        t_comp = math.exp(xv)
+        x_comp = math.log(y_safe)
+        ch = math.cosh(phi)
+        sh = math.sinh(phi)
+        t_new = t_comp * ch - (x_comp / c) * sh
+        x_new = x_comp * ch - t_comp * c * sh
+        if t_new <= 0:
+            t_new = 1e-300
+        x_out = math.log(t_new)
+        # Guard exp overflow on x_new
+        if x_new > 709.0:
+            x_new = 709.0
+        elif x_new < -709.0:
+            x_new = -709.0
+        y_out = math.exp(x_new)
+        return EMLPoint(x_out, y_out, D=self._D)
+
+    def boost_velocity(self, v: float, c: float = 1.0) -> "EMLPoint":
+        """Boost by velocity v (converts to rapidity phi = atanh(v/c))."""
+        if abs(v) >= c:
+            raise ValueError(f"Speed |v| = {abs(v):.6g} must be less than c = {c:.6g}")
+        phi = math.atanh(v / c)
+        return self.boost(phi, c=c)
+
+    def light_cone_coordinates(self, c: float = 1.0) -> "tuple[float, float]":
+        """Returns null coordinates (u, v) = (t + x/c, t - x/c)."""
+        xv = self.x
+        if xv > OVERFLOW_THRESHOLD:
+            xv = math.log(xv)
+        yv = self.y
+        y_safe = abs(yv) if yv <= 0 else yv
+        if y_safe == 0:
+            y_safe = 1e-300
+        t_comp = math.exp(xv)
+        x_comp = math.log(y_safe) / c
+        return t_comp + x_comp, t_comp - x_comp
+
+    def light_cone_type(self, c: float = 1.0) -> str:
+        """Returns 'timelike', 'spacelike', or 'lightlike'."""
+        if self.is_lightlike(c=c):
+            return "lightlike"
+        if self.is_timelike(c=c):
+            return "timelike"
+        return "spacelike"
+
+    def future_light_cone(self, c: float = 1.0) -> bool:
+        """True if this event is in the future light cone (timelike and exp(x) > 0)."""
+        return self.is_timelike(c=c)  # exp(x) is always > 0, so timelike implies future
+
+    def rest_energy(self, c: float = 1.0) -> float:
+        """Δ_M in natural units — rest energy E_0 = m*c^2 (with c=1 this is rest mass)."""
+        return self.minkowski_delta(signature="+---", c=c)
+
+    def proper_time(self, c: float = 1.0) -> float:
+        """Proper time tau = Δ_M / c for timelike worldlines."""
+        return self.rest_energy(c=c) / c
 
     # ── dunder ────────────────────────────────────────────────────────────────
 
