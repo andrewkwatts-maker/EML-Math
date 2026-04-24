@@ -1,4 +1,5 @@
 use pyo3::prelude::*;
+use rayon::prelude::*;
 
 mod point;
 mod pair;
@@ -87,6 +88,21 @@ fn find_formula(
     })
 }
 
+/// Batch Lorentz boost: apply boost(phi_i, c) to each (x_i, y_i) point in parallel.
+/// Returns Vec of (x', y') tuples.
+#[pyfunction]
+fn boost_n(points: Vec<(f64, f64)>, phis: Vec<f64>, c: f64) -> Vec<(f64, f64)> {
+    points
+        .par_iter()
+        .zip(phis.par_iter())
+        .map(|((x, y), phi)| {
+            let p = EMLPoint::new(*x, *y);
+            let b = p.boost(*phi, c);
+            (b.x, b.y)
+        })
+        .collect()
+}
+
 #[pymodule]
 fn eml_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Core types
@@ -97,6 +113,7 @@ fn eml_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(schrodinger_step_n, m)?)?;
     m.add_function(wrap_pyfunction!(rotate_phase_n, m)?)?;
     m.add_function(wrap_pyfunction!(simulate_pulses_n, m)?)?;
+    m.add_function(wrap_pyfunction!(boost_n, m)?)?;
     // Formula discovery
     m.add_class::<PySearchResult>()?;
     m.add_function(wrap_pyfunction!(find_formula, m)?)?;
