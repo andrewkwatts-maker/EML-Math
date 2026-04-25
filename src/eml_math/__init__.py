@@ -80,6 +80,9 @@ from eml_math.simulation import (
     find_resonance_bands,
 )
 
+# Formula discovery / equation compression
+from eml_math.discover import Searcher, SearchResult, compress, recognize
+
 # v1.0.0 geometry and physics layer
 from eml_math.momentum import FourMomentum
 from eml_math.discrete import planck_delta, lattice_distance, is_lattice_neighbor
@@ -118,6 +121,11 @@ __all__ = [
     "verify_conservation",
     "frame_shift_count",
     "find_resonance_bands",
+    # Formula discovery
+    "Searcher",
+    "SearchResult",
+    "compress",
+    "recognize",
     # Geometry and physics (v1.0.0)
     "FourMomentum",
     "planck_delta",

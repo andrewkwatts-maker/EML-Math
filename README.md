@@ -246,6 +246,69 @@ print(is_lattice_neighbor(p, EMLPoint(2,1))) # bool
 
 ---
 
+## Formula Discovery and Equation Compression
+
+The `compress()` function is an equation simplification pipeline. Give it any Python callable
+and it returns the most compact EML closed-form expression that reproduces it numerically.
+
+**Round-trip compression:** formula → EML → simplified form → back to standard notation.
+
+```python
+import math
+from eml_math.discover import compress, recognize
+
+# ── Tautologies collapse to constants ────────────────────────────────────────
+r = compress(lambda x: math.sin(x)**2 + math.cos(x)**2)
+print(r.formula)      # "1"  (Pythagorean identity → constant)
+print(r.error)        # < 1e-8
+
+# ── Redundant composition collapses ──────────────────────────────────────────
+r = compress(lambda x: math.exp(math.log(x)), x_lo=0.5, x_hi=3.0)
+print(r.formula)      # "x"  (exp∘ln = identity)
+print(r.error)        # < 1e-10
+
+# ── The fundamental EML expression ───────────────────────────────────────────
+r = compress(lambda x: math.exp(x) - math.log(x), x_lo=0.5, x_hi=3.0)
+print(r.formula)      # "eml(x, x)"  — the minimal EML form
+print(r.complexity)   # 3 nodes
+
+# ── Identify known constants ──────────────────────────────────────────────────
+print(recognize(math.pi).formula)            # "π"
+print(recognize(math.e).formula)             # "e"
+print(recognize((1 + math.sqrt(5)) / 2).formula)  # "φ (golden ratio)"
+
+# ── Get back standard Python or LaTeX ────────────────────────────────────────
+r = compress(math.exp)
+print(r.to_python())  # "import math\nf = lambda x: math.exp(x)"
+print(r.to_latex())   # "\exp(x)"
+
+# ── Full Searcher API for data-driven discovery ───────────────────────────────
+from eml_math.discover import Searcher
+x = [0.2 + i * 0.07 for i in range(40)]
+y = [math.exp(xi) - math.log(xi) for xi in x]
+result = Searcher(max_complexity=6, precision_goal=1e-10).find(x, y)
+print(result)  # SearchResult(formula='eml(x, x)', error=..., complexity=3)
+```
+
+**How it works:** The search engine uses a Rust-backed beam search over EML expression trees.
+Because the EML Sheffer operator generates all 36 elementary functions, any expression built
+from `exp`, `ln`, `+`, `−`, `×`, `÷`, `sin`, `cos` has a representation in EML tree form.
+The beam search finds the minimal-complexity tree that fits your data within the precision goal.
+
+The round-trip is exact for expressions that live in EML space (which is all elementary
+mathematics). The compression is purely numerical — it samples your function over a range and
+searches for the shortest formula that matches those samples. For algebraic identities like
+sin²+cos²=1, the compressor finds the simplified constant form automatically.
+
+```python
+# Complexity comparison: verbose vs compressed
+verbose   = lambda x: (math.sin(x)**2 + math.cos(x)**2) * math.exp(0)
+compressed = compress(verbose)
+print(compressed.formula, compressed.complexity)   # "1"  complexity=1
+```
+
+---
+
 ## Architecture
 
 | Module | Contents |
