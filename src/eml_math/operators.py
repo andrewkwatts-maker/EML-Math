@@ -215,8 +215,11 @@ def pow_fn(base: _Arg, exponent: _Arg) -> TensionPoint:
 def log_fn(base: _Arg, x: _Arg) -> TensionPoint:
     """
     Logarithm base b: log_b(x) = ln(x) / ln(b).
+
+    Uses _DivNode so that log_b(x) is correct when x < 1 (ln(x) < 0),
+    which the pure-EML div() would get wrong due to sign loss in ln().
     """
-    return div(ln(_t(x)), ln(_t(base)))
+    return _DivNode(ln(_t(x)), ln(_t(base)))
 
 
 def avg(a: _Arg, b: _Arg) -> TensionPoint:
@@ -326,27 +329,49 @@ def arctan(x: _Arg) -> TensionPoint:
 
 
 def sinh(x: _Arg) -> TensionPoint:
-    """Hyperbolic sine: sinh(x) = (exp(x) - exp(-x)) / 2."""
+    """
+    Hyperbolic sine: sinh(x) = (exp(x) - exp(-x)) / 2.
+
+    Uses _ScaleNode for the ×½ step so that negative values (x<0)
+    are handled correctly — div() loses sign on negative numerators.
+    """
     xv = _t(x)
-    return div(sub(exp(xv), exp(neg(xv))), _LitNode(2.0))
+    return _ScaleNode(sub(exp(xv), exp(neg(xv))), 0.5)
 
 
 def cosh(x: _Arg) -> TensionPoint:
-    """Hyperbolic cosine: cosh(x) = (exp(x) + exp(-x)) / 2."""
+    """
+    Hyperbolic cosine: cosh(x) = (exp(x) + exp(-x)) / 2.
+
+    Uses _ScaleNode for the ×½ step (add() is always positive so div
+    would also work, but _ScaleNode is consistent with sinh).
+    """
     xv = _t(x)
-    return div(add(exp(xv), exp(neg(xv))), _LitNode(2.0))
+    return _ScaleNode(add(exp(xv), exp(neg(xv))), 0.5)
 
 
 def tanh(x: _Arg) -> TensionPoint:
-    """Hyperbolic tangent: tanh(x) = sinh(x) / cosh(x)."""
+    """
+    Hyperbolic tangent: tanh(x) = sinh(x) / cosh(x).
+
+    cosh(x) > 0 always, so we compute as _ScaleNode(sinh, 1/cosh)
+    to avoid div()'s ln-based formula losing sign on negative sinh.
+    """
     xv = _t(x)
-    return div(sinh(xv), cosh(xv))
+    sh = sinh(xv)
+    ch = cosh(xv)
+    return _ScaleNode(sh, 1.0 / ch.tension())
 
 
 def arsinh(x: _Arg) -> TensionPoint:
-    """Inverse hyperbolic sine: arsinh(x) = ln(x + √(x²+1))."""
-    xv = _t(x)
-    return ln(add(xv, sqrt(add(sqr(xv), _LitNode(1.0)))))
+    """
+    Inverse hyperbolic sine: arsinh(x) = ln(x + √(x²+1)).
+
+    For x < 0: x + √(x²+1) > 0 always, so ln() is valid, but
+    add(xv, sqrt(...)) can be negative for very negative x unless
+    checked. Use stdlib for robustness.
+    """
+    return _LitNode(math.asinh(_t(x).tension()))
 
 
 def arcosh(x: _Arg) -> TensionPoint:
@@ -355,17 +380,25 @@ def arcosh(x: _Arg) -> TensionPoint:
 
 
 def artanh(x: _Arg) -> TensionPoint:
-    """Inverse hyperbolic tangent: artanh(x) = ln((1+x)/(1-x)) / 2."""
+    """
+    Inverse hyperbolic tangent: artanh(x) = ½ · ln((1+x)/(1-x)).
+
+    Uses _ScaleNode for ×½ so that negative ln values (x<0) are
+    handled correctly.
+    """
     xv = _t(x)
-    return mul(
-        _LitNode(0.5),
-        ln(div(add(_LitNode(1.0), xv), sub(_LitNode(1.0), xv)))
-    )
+    inner = ln(div(add(_LitNode(1.0), xv), sub(_LitNode(1.0), xv)))
+    return _ScaleNode(inner, 0.5)
 
 
 def half(x: _Arg) -> TensionPoint:
-    """x / 2."""
-    return mul(_LitNode(0.5), _t(x))
+    """
+    x / 2.
+
+    Uses _ScaleNode so negative x is handled correctly (mul(0.5, x)
+    uses exp(ln(0.5)+ln(x)) which loses sign when x<0).
+    """
+    return _ScaleNode(_t(x), 0.5)
 
 
 def logistic(x: _Arg) -> TensionPoint:
@@ -398,6 +431,35 @@ def quantize(T: float, D: float) -> int:
 
 
 # ── Helper nodes (practical placeholders, pending Table-1 EML derivations) ────
+
+class _DivNode(EMLPoint):
+    """
+    Direct float division a / b. Handles negative numerators correctly.
+
+    div(a, b) = exp(ln(a) - ln(b)) loses sign when a < 0. _DivNode is
+    used for divisions where the numerator may be negative (e.g. log_fn
+    with x < 1).
+    """
+
+    __slots__ = ("_a", "_b")
+
+    def __init__(self, a: EMLPoint, b: EMLPoint) -> None:
+        super().__init__(0.0, 1.0, D=None)
+        self._a = a
+        self._b = b
+
+    def tension(self) -> float:
+        bv = self._b.tension()
+        if abs(bv) < 1e-300:
+            bv = math.copysign(1e-300, bv)
+        return self._a.tension() / bv
+
+    def is_leaf(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"_DivNode({self._a!r}, {self._b!r})"
+
 
 class _ScaleNode(EMLPoint):
     """
