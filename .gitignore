@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+.venv*/
+venv/
+env/
+.env
+
+# Rust / Cargo
+target/
+Cargo.lock
+
+# Maturin build artifacts
+*.so
+*.dylib
+*.dll
+# keep the compiled extension in-tree (required for maturin develop)
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Claude memory
+.claude/
+
+# Misc
+PrincipiaMetaphysica_Improvements.txt
+Improvements.txt

@@ -111,7 +111,7 @@ impl EMLPoint {
         let y_safe = if self.y <= 0.0 { self.y.abs().max(1e-300) } else { self.y };
         let t = xv.exp();
         let s = y_safe.ln();
-        let (sh, ch) = phi.sinh_cosh();
+        let (sh, ch) = (phi.sinh(), phi.cosh());
         let t_new = (t * ch - (s / c) * sh).max(1e-300);
         let s_new = (s * ch - t * c * sh).clamp(-709.0, 709.0);
         EMLPoint {

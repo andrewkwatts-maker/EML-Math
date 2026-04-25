@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Reference — EML-Math</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <span class="brand">EML-Math</span>
+  <span class="badge">v0.5.0</span>
+  <a href="index.html">Home</a>
+  <a href="concepts.html">Concepts</a>
+  <a href="guide.html">Guide</a>
+  <a href="api.html">API</a>
+  <a href="https://github.com/andrewkwatts-maker/EML-Math">GitHub</a>
+</nav>
+
+<main>
+
+<h1>API Reference</h1>
+
+<div class="callout">
+  All public symbols are importable from <code>eml_math</code> directly. Submodule imports are also supported for fine-grained access.
+</div>
+
+<h2>EMLPoint</h2>
+<p><code>from eml_math import EMLPoint</code></p>
+
+<table>
+  <thead><tr><th>Method / Property</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>EMLPoint(x, y, D=None)</code></td><td>Create a node. <code>x</code>, <code>y</code> can be floats or nested <code>EMLPoint</code>s. <code>D</code> enables discrete mode.</td></tr>
+    <tr><td><code>.tension() → float</code></td><td><code>exp(x) − ln(y)</code> — the EML Sheffer operator. Alias: <code>.eml()</code></td></tr>
+    <tr><td><code>.mirror_pulse() → EMLPoint</code></td><td>One Mirror-Pulse step: <code>(x, y) → (|y|, T)</code>. Alias: <code>.pulse()</code></td></tr>
+    <tr><td><code>.frame_shift() → EMLPoint</code></td><td>Forced Axiom-8 frame shift using <code>|y|</code>.</td></tr>
+    <tr><td><code>.is_slipping() → bool</code></td><td>True if <code>x &gt; OVERFLOW_THRESHOLD</code> (Slipping Wheel).</td></tr>
+    <tr><td><code>.conserves_tension(nxt, tol) → bool</code></td><td>Verify Axiom 10 identity.</td></tr>
+    <tr><td><code>.resonates_with(other, tol) → bool</code></td><td>Axiom 14: tension ratios match.</td></tr>
+    <tr><td><code>.is_leaf() → bool</code></td><td>True if both coords are plain floats (Rust delegation enabled).</td></tr>
+    <tr><td><code>.diff(var) → EMLPoint</code></td><td>Symbolic differentiation w.r.t. a named variable.</td></tr>
+  </tbody>
+</table>
+
+<h3>Geometry (v0.5.0)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>.pair() → EMLPair</code></td><td><code>(exp(x), ln(|y|))</code> as an <code>EMLPair</code>.</td></tr>
+    <tr><td><code>.euclidean_delta() → float</code></td><td><code>√(exp(2x) + (ln y)²)</code> — Euclidean frame invariant. Rust-accelerated.</td></tr>
+    <tr><td><code>.minkowski_delta(signature="+---", c=1.0) → float</code></td><td><code>√|exp(2x) − (c·ln y)²|</code>. Rust-accelerated.</td></tr>
+    <tr><td><code>.is_timelike(c) → bool</code></td><td><code>exp(2x) &gt; (c·ln y)²</code></td></tr>
+    <tr><td><code>.is_spacelike(c) → bool</code></td><td><code>exp(2x) &lt; (c·ln y)²</code></td></tr>
+    <tr><td><code>.is_lightlike(c, tol) → bool</code></td><td><code>|exp(2x) − (c·ln y)²| &lt; tol</code></td></tr>
+    <tr><td><code>.light_cone_type(c) → str</code></td><td><code>"timelike"</code>, <code>"spacelike"</code>, or <code>"lightlike"</code>.</td></tr>
+    <tr><td><code>.light_cone_coordinates(c) → (float, float)</code></td><td>Null coordinates <code>(t+x, t−x)</code>.</td></tr>
+    <tr><td><code>.rapidity() → float</code></td><td><code>atanh(ln(y)/exp(x))</code>. Raises <code>ValueError</code> for spacelike.</td></tr>
+    <tr><td><code>.boost(phi, c=1.0) → EMLPoint</code></td><td>Lorentz boost by rapidity φ. Δ_M invariant. Rust-accelerated.</td></tr>
+    <tr><td><code>.boost_velocity(v, c=1.0) → EMLPoint</code></td><td>Boost by velocity v. Raises if <code>|v| ≥ c</code>.</td></tr>
+    <tr><td><code>.canonical_frame(k=0) → EMLPair</code></td><td>Rotate pair into frame k ∈ {0,1,2,3} (×1, ×i, ×−1, ×−i).</td></tr>
+    <tr><td><code>.rest_energy(c) → float</code></td><td>Alias for <code>minkowski_delta()</code>.</td></tr>
+    <tr><td><code>.proper_time(c) → float</code></td><td><code>rest_energy() / c</code>.</td></tr>
+  </tbody>
+</table>
+
+<h2>EMLPair</h2>
+<p><code>from eml_math import EMLPair</code></p>
+<table>
+  <thead><tr><th>Method / Property</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>EMLPair(real_state, imag_state)</code></td><td>Two-real replacement for complex numbers.</td></tr>
+    <tr><td><code>.real_tension, .imag_tension → float</code></td><td>Component tensions.</td></tr>
+    <tr><td><code>.modulus → float</code></td><td><code>|z| = √(real² + imag²)</code></td></tr>
+    <tr><td><code>.argument → float</code></td><td>Phase angle θ = arctan2(imag, real).</td></tr>
+    <tr><td><code>.mirror_pulse() → EMLPair</code></td><td>Advance both knots simultaneously.</td></tr>
+    <tr><td><code>.rotate_phase(angle) → EMLPair</code></td><td>Rotate by angle radians.</td></tr>
+    <tr><td><code>.conjugate() → EMLPair</code></td><td>Complex conjugate.</td></tr>
+    <tr><td><code>.frames() → list[EMLPair]</code></td><td>All 4 cardinal rotations — same Euclidean delta.</td></tr>
+    <tr><td><code>+, -, *, /</code></td><td>Complex arithmetic via EMLPair operators.</td></tr>
+    <tr><td><code>EMLPair.from_values(r, i) → EMLPair</code></td><td>Construct from scalar float pair.</td></tr>
+    <tr><td><code>EMLPair.from_polar(r, theta) → EMLPair</code></td><td>Polar form r·e^(iθ).</td></tr>
+    <tr><td><code>EMLPair.unit_i(), .one(), .zero()</code></td><td>Common constants.</td></tr>
+  </tbody>
+</table>
+
+<h2>EMLState</h2>
+<p><code>from eml_math import EMLState</code></p>
+<table>
+  <thead><tr><th>Method / Property</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>EMLState(point, n=0, theta=0.0)</code></td><td>Full Φ(n, ρ, θ) state.</td></tr>
+    <tr><td><code>EMLState.from_point(point, n, theta)</code></td><td>Factory classmethod.</td></tr>
+    <tr><td><code>.rho → float</code></td><td>Tension density |T|.</td></tr>
+    <tr><td><code>.flip_count → int</code></td><td>Number of completed Mirror-Pulses.</td></tr>
+    <tr><td><code>.phase → float</code></td><td>Phase θ ∈ [0, 2π).</td></tr>
+    <tr><td><code>.mirror_pulse() → EMLState</code></td><td>One step. Alias: <code>.pulse()</code></td></tr>
+    <tr><td><code>.three_one_flip() → EMLState</code></td><td>4 pulses (3+1 cycle). Alias: <code>.flip()</code></td></tr>
+    <tr><td><code>.minkowski_pulse(n, c) → list[EMLState]</code></td><td>Run n pulses, return trajectory.</td></tr>
+    <tr><td><code>.geodesic_step(metric, dtau) → EMLState</code></td><td>Euler geodesic step using a <code>MetricTensor</code>.</td></tr>
+    <tr><td><code>.tread_yield() → int</code></td><td>Net reality units accumulated.</td></tr>
+  </tbody>
+</table>
+
+<h2>MetricTensor</h2>
+<p><code>from eml_math.metric import MetricTensor</code></p>
+<table>
+  <thead><tr><th>Method</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>MetricTensor(g, dim=2)</code></td><td>Custom metric from callable <code>g(EMLPoint) → [[f64]]</code>.</td></tr>
+    <tr><td><code>.ds2(p, dx, dy) → float</code></td><td>Line element g_{μν} dx^μ dx^ν.</td></tr>
+    <tr><td><code>.proper_time(p, dx, dy) → float</code></td><td>√|ds²|.</td></tr>
+    <tr><td><code>.is_curved(p, tol) → bool</code></td><td>Differs from flat Minkowski.</td></tr>
+    <tr><td><code>.christoffel(lam, mu, nu, p, h) → float</code></td><td>Numeric Γ^λ_{μν}. Rust-accelerated for Schwarzschild.</td></tr>
+    <tr><td><code>MetricTensor.flat()</code></td><td>Minkowski (+, −).</td></tr>
+    <tr><td><code>MetricTensor.schwarzschild(rs=2.0)</code></td><td>Schwarzschild metric. Analytic Christoffels via Rust.</td></tr>
+    <tr><td><code>MetricTensor.flrw(scale_factor_a, k=0)</code></td><td>FLRW cosmological metric.</td></tr>
+    <tr><td><code>MetricTensor.calabi_yau_3(kahler_potential)</code></td><td>Kähler metric on Calabi–Yau 3-fold.</td></tr>
+    <tr><td><code>MetricTensor.klebanov_strassler(gsM=0.1)</code></td><td>KS warped deformed conifold.</td></tr>
+    <tr><td><code>MetricTensor.heterotic_e8x8(radius=1.0)</code></td><td>Heterotic E₈×E₈ compactification.</td></tr>
+    <tr><td><code>MetricTensor.ads5_x_s5(L=1.0)</code></td><td>AdS₅ × S⁵ (Poincaré coords).</td></tr>
+    <tr><td><code>MetricTensor.g2_holonomy()</code></td><td>Bryant–Salamon G₂-holonomy cone.</td></tr>
+  </tbody>
+</table>
+
+<h2>Other v0.5.0 Classes</h2>
+
+<table>
+  <thead><tr><th>Class</th><th>Module</th><th>Key methods</th></tr></thead>
+  <tbody>
+    <tr><td><code>FourMomentum</code></td><td><code>eml_math.momentum</code></td><td><code>.energy</code>, <code>.momentum</code>, <code>.mass</code>, <code>.gamma()</code>, <code>.boost(phi)</code>, <code>.from_mass_velocity(m, v, c)</code></td></tr>
+    <tr><td><code>EMLNDVector</code></td><td><code>eml_math.ndim</code></td><td><code>.euclidean_norm()</code>, <code>.minkowski_norm_nd(sig)</code>, <code>.n</code>, <code>.coords</code></td></tr>
+    <tr><td><code>Octonion</code></td><td><code>eml_math.octonion</code></td><td><code>.__mul__</code> (Fano), <code>.norm()</code>, <code>.conjugate()</code>, <code>.to_ndvector()</code></td></tr>
+    <tr><td><code>MinkowskiFourVector</code></td><td><code>eml_math.fourvector</code></td><td><code>.minkowski_norm()</code>, <code>.boost(phi, dir)</code>, <code>.four_momentum()</code></td></tr>
+    <tr><td><code>EMLMultivector</code></td><td><code>eml_math.geometric_algebra</code></td><td><code>.*</code> (geometric product), <code>.quadratic()</code>, <code>.reverse()</code>, <code>.rotor(angle, plane)</code>, <code>.rotate(R)</code>, factories</td></tr>
+  </tbody>
+</table>
+
+<h2>Lattice Functions</h2>
+<table>
+  <thead><tr><th>Function</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>e8_lattice_points(n=10, scale=1.0)</code></td><td>Up to 240 E₈ root vectors as <code>EMLNDVector</code>.</td></tr>
+    <tr><td><code>e8_min_norm() → float</code></td><td>√2 — minimum E₈ root vector norm.</td></tr>
+    <tr><td><code>leech_lattice_points(n=5, scale=1.0)</code></td><td>Leech lattice vectors (24D).</td></tr>
+    <tr><td><code>leech_min_norm() → float</code></td><td>2 — minimum Leech norm.</td></tr>
+    <tr><td><code>planck_delta(point, D=PLANCK_D)</code></td><td>Quantised Minkowski delta.</td></tr>
+    <tr><td><code>lattice_distance(p1, p2, D)</code></td><td>Planck-quantised distance.</td></tr>
+    <tr><td><code>is_lattice_neighbor(p1, p2, D)</code></td><td>True if adjacent on the Planck lattice.</td></tr>
+  </tbody>
+</table>
+
+<h2>Rust Batch Functions</h2>
+<p><code>from eml_math import eml_core</code></p>
+<table>
+  <thead><tr><th>Function</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>boost_n(points, phis, c) → list[tuple]</code></td><td>Parallel Lorentz boost of N points.</td></tr>
+    <tr><td><code>christoffel_batch_n(points, lam, mu, nu, rs) → list[float]</code></td><td>Parallel Schwarzschild Γ.</td></tr>
+    <tr><td><code>octonion_mul_n(a_batch, b_batch) → list</code></td><td>Parallel octonion multiplication.</td></tr>
+    <tr><td><code>geometric_product_n(a_batch, b_batch, sig) → list</code></td><td>Parallel Clifford products.</td></tr>
+    <tr><td><code>simulate_pulses_n(states, n) → list</code></td><td>Parallel Mirror-Pulse trajectories.</td></tr>
+  </tbody>
+</table>
+
+<h2>C API Functions</h2>
+<p>Header: <code>c_api/eml_math.h</code> · Library: <code>libeml_math.a</code> / <code>libeml_math.so</code> / <code>eml_math.dll</code></p>
+<table>
+  <thead><tr><th>C Function</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>eml_tension(x, y)</code></td><td>Core EML operator.</td></tr>
+    <tr><td><code>eml_mirror_pulse(x, y, *ox, *oy)</code></td><td>One iteration step.</td></tr>
+    <tr><td><code>eml_simulate_pulses(x0, y0, n, *xs, *ys)</code></td><td>Trajectory into pre-allocated arrays.</td></tr>
+    <tr><td><code>eml_euclidean_delta(x, y)</code></td><td>Euclidean frame invariant.</td></tr>
+    <tr><td><code>eml_minkowski_delta(x, y, plus_sig, c)</code></td><td>Minkowski spacetime interval.</td></tr>
+    <tr><td><code>eml_rapidity(x, y)</code></td><td>Rapidity φ (NaN if not timelike).</td></tr>
+    <tr><td><code>eml_causal_type(x, y, c, tol)</code></td><td>+1/0/−1 for timelike/lightlike/spacelike.</td></tr>
+    <tr><td><code>eml_boost(x, y, phi, c, *ox, *oy)</code></td><td>Lorentz boost.</td></tr>
+    <tr><td><code>eml_boost_batch(xs, ys, phis, c, n, oxs, oys)</code></td><td>Batch boost.</td></tr>
+    <tr><td><code>eml_schwarzschild_christoffel(lam, mu, nu, r, rs)</code></td><td>Analytic Christoffel symbol.</td></tr>
+    <tr><td><code>eml_octonion_mul(a[8], b[8], out[8])</code></td><td>Fano-plane octonion product.</td></tr>
+  </tbody>
+</table>
+
+</main>
+
+<footer>
+  <p>EML-Math v0.5.0 · MIT License · Andrew K Watts 2026</p>
+</footer>
+
+</body>
+</html>

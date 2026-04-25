@@ -130,6 +130,9 @@ def phase_series(trajectory: list[TensionKnot]) -> list[float]:
 def verify_conservation(
     trajectory: list[TensionKnot],
     tolerance: float = 1e-9,
+    check_minkowski: bool = False,
+    minkowski_tolerance: float = 1e-6,
+    c: float = 1.0,
 ) -> bool:
     """
     Verify Axiom 10 (Conservation of Tension) holds at every step.
@@ -137,13 +140,31 @@ def verify_conservation(
     Axiom 10: T_{t+1} + x_t = exp(x_t)
     Equivalently: conserves_tension() on each consecutive pair.
 
+    Parameters
+    ----------
+    trajectory : list[EMLState]
+        Sequence of states to check.
+    tolerance : float
+        Tolerance for Axiom-10 tension conservation.
+    check_minkowski : bool
+        When True, additionally verify that the Minkowski interval Δ_M is
+        approximately constant across all states (geodesic invariance check).
+    minkowski_tolerance : float
+        Maximum permitted drift in Δ_M across the trajectory.
+    c : float
+        Speed-of-light scale passed to ``minkowski_delta()``.
+
     Returns
     -------
     bool
-        True if all steps satisfy Axiom 10 within tolerance.
+        True if all checks pass within their respective tolerances.
     """
     for i in range(len(trajectory) - 1):
         if not trajectory[i].point.conserves_tension(trajectory[i + 1].point, tol=tolerance):
+            return False
+    if check_minkowski and len(trajectory) > 1:
+        deltas = [s.point.minkowski_delta(c=c) for s in trajectory]
+        if max(deltas) - min(deltas) > minkowski_tolerance:
             return False
     return True
 

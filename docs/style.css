@@ -1,0 +1,141 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --accent2: #3fb950;
+  --warn: #f0883e;
+  --code-bg: #1c2128;
+  --code-text: #e6edf3;
+  --radius: 6px;
+  --max-w: 900px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  padding: 0 1rem;
+}
+
+nav {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+nav a { color: var(--accent); text-decoration: none; font-weight: 500; }
+nav a:hover { text-decoration: underline; }
+nav .brand { color: var(--text); font-weight: 700; font-size: 1.1rem; margin-right: auto; }
+nav .badge {
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.7rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 20px;
+  font-weight: 700;
+}
+
+main { max-width: var(--max-w); margin: 2rem auto 4rem; }
+
+h1 { font-size: 2.2rem; color: #e6edf3; margin-bottom: 0.5rem; }
+h2 { font-size: 1.5rem; color: #e6edf3; margin: 2.5rem 0 1rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.15rem; color: var(--accent); margin: 1.5rem 0 0.5rem; }
+h4 { font-size: 1rem; color: var(--accent2); margin: 1rem 0 0.4rem; }
+
+p { margin-bottom: 0.9rem; }
+a { color: var(--accent); }
+
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  color: var(--code-text);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  margin: 0.5rem 0 1.2rem;
+}
+pre code { background: none; padding: 0; font-size: 0.875rem; line-height: 1.7; }
+
+.kw  { color: #ff7b72; }   /* keyword */
+.fn  { color: #d2a8ff; }   /* function */
+.st  { color: #a5d6ff; }   /* string */
+.cm  { color: #8b949e; font-style: italic; }  /* comment */
+.num { color: #79c0ff; }   /* number */
+.op  { color: #ff7b72; }   /* operator */
+
+table { border-collapse: collapse; width: 100%; margin: 1rem 0 1.5rem; }
+th { background: var(--surface); color: var(--text); text-align: left; padding: 0.6rem 0.8rem; border: 1px solid var(--border); }
+td { padding: 0.55rem 0.8rem; border: 1px solid var(--border); vertical-align: top; }
+tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: rgba(88, 166, 255, 0.06);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.callout.warn { border-color: var(--warn); background: rgba(240,136,62,0.06); }
+.callout.green { border-color: var(--accent2); background: rgba(63,185,80,0.06); }
+
+.hero {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  margin-bottom: 2rem;
+  text-align: center;
+}
+.hero .subtitle { color: var(--muted); margin-top: 0.4rem; font-size: 1.05rem; }
+.hero .big { font-size: 1.4rem; font-family: monospace; color: var(--accent2); margin: 1rem 0; }
+.hero .links { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+.hero .links a {
+  background: var(--accent);
+  color: var(--bg);
+  padding: 0.4rem 1.2rem;
+  border-radius: 20px;
+  text-decoration: none;
+  font-weight: 600;
+}
+.hero .links a.sec { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+@media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.card h4 { margin-top: 0; }
+
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: var(--max-w);
+  margin: 0 auto;
+}

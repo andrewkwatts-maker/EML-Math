@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EML-Math — Universal Mathematics from a Single Operator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <span class="brand">EML-Math</span>
+  <span class="badge">v0.5.0</span>
+  <a href="index.html">Home</a>
+  <a href="concepts.html">Concepts</a>
+  <a href="guide.html">Guide</a>
+  <a href="api.html">API</a>
+  <a href="https://github.com/andrewkwatts-maker/EML-Math">GitHub</a>
+</nav>
+
+<main>
+
+<div class="hero">
+  <h1>EML-Math</h1>
+  <p class="subtitle">All of mathematics from a single operator · High-performance Rust backend · C/C++/Rust compatible</p>
+  <div class="big">eml(x, y) = exp(x) − ln(y)</div>
+  <p style="color:var(--muted);max-width:600px;margin:0 auto;">One binary operator reconstructs all 36 elementary functions — <em>+, −, ×, /, exp, ln, sin, cos, π, e</em> — and extends to Lorentz boosts, spacetime metrics, octonions, and Clifford algebras.</p>
+  <div class="links">
+    <a href="guide.html">Get Started</a>
+    <a href="api.html" class="sec">API Reference</a>
+    <a href="https://arxiv.org/html/2603.21852v2" class="sec">arXiv Paper</a>
+  </div>
+</div>
+
+<h2>Install</h2>
+<pre><code>pip install eml-math</code></pre>
+<pre><code>pip install eml-math[ext]   <span class="cm"># adds NumPy + SymPy acceleration</span></code></pre>
+
+<h2>The Operator</h2>
+<p>The <strong>EML Sheffer operator</strong> is the continuous analog of NAND for Boolean logic. Odrzywolek (2026) proved that <code>eml(x, y) = exp(x) − ln(y)</code> together with the constant <code>1</code> generates all of elementary mathematics:</p>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+<span class="kw">import</span> math
+
+EMLPoint(<span class="num">1</span>, <span class="num">1</span>).eml()           <span class="cm"># e  = 2.71828...</span>
+EMLPoint(<span class="num">2</span>, <span class="num">1</span>).eml()           <span class="cm"># exp(2) = 7.38905...</span>
+
+<span class="cm"># Nesting EMLPoints builds any expression</span>
+EMLPoint(<span class="num">1</span>, EMLPoint(EMLPoint(<span class="num">1</span>, math.e), <span class="num">1</span>)).eml()  <span class="cm"># ln(e) = 1.0</span></code></pre>
+
+<h2>What's New in v0.5.0</h2>
+<div class="grid2">
+  <div class="card">
+    <h4>Lorentz Geometry</h4>
+    <p><code>EMLPoint.boost(φ)</code>, <code>minkowski_delta()</code>, <code>rapidity()</code>, <code>light_cone_type()</code> — relativistic mechanics built from the EML coordinate pair.</p>
+  </div>
+  <div class="card">
+    <h4>Spacetime Metrics</h4>
+    <p><code>MetricTensor</code> with 8 built-in geometries: flat, Schwarzschild, FLRW, Calabi–Yau, Klebanov–Strassler, Heterotic E₈×E₈, AdS₅×S⁵, G₂.</p>
+  </div>
+  <div class="card">
+    <h4>Octonions &amp; Lattices</h4>
+    <p><code>Octonion</code> with Fano-plane product. E₈ lattice (240 roots). Leech lattice. <code>EMLNDVector</code> for N-dimensional EML spaces.</p>
+  </div>
+  <div class="card">
+    <h4>Clifford Algebra</h4>
+    <p><code>EMLMultivector</code> — full geometric product <code>ab = a·b + a∧b</code>, rotors, grade projection. Unifies all metric constructions in one operator.</p>
+  </div>
+  <div class="card">
+    <h4>Rust Batch Functions</h4>
+    <p><code>boost_n</code>, <code>octonion_mul_n</code>, <code>geometric_product_n</code>, <code>christoffel_batch_n</code> — Rayon-parallel batch operations, up to 9× faster than Python.</p>
+  </div>
+  <div class="card">
+    <h4>C API</h4>
+    <p>Standalone <code>libeml_math</code> (static + shared) with no Python dependency. Use from C, C++, or as a Rust crate. Includes <code>eml_math.h</code> header.</p>
+  </div>
+</div>
+
+<h2>Architecture</h2>
+<pre><code>eml-math
+├── Python layer (pure-Python fallback for all operations)
+│   ├── point.py        EMLPoint — universal EML node
+│   ├── pair.py         EMLPair  — real complex replacement
+│   ├── state.py        EMLState — Φ(n, ρ, θ) kinematic state
+│   ├── operators.py    36 elementary functions as EML trees
+│   ├── simulation.py   Mirror-Pulse trajectory engine
+│   ├── momentum.py     FourMomentum — relativistic mechanics
+│   ├── discrete.py     Planck lattice helpers
+│   ├── metric.py       MetricTensor + 8 spacetime geometries
+│   ├── ndim.py         EMLNDVector, E₈, Leech lattice
+│   ├── octonion.py     Octonion (Fano-plane product)
+│   ├── fourvector.py   MinkowskiFourVector (3+1D)
+│   ├── geometric_algebra.py  EMLMultivector (Clifford)
+│   ├── qft.py          Klein-Gordon, Dirac, Path Integral
+│   └── qm/             Qubits, entanglement (Q1–Q5)
+│
+├── Rust backend (PyO3 / maturin — auto-used when inputs are plain floats)
+│   ├── point.rs        euclidean_delta, minkowski_delta, boost, pair
+│   ├── pair.rs         schrodinger_step_n, rotate_phase_n
+│   ├── knot.rs         simulate_pulses_n
+│   ├── metric.rs       christoffel_batch_n (Schwarzschild, Rayon)
+│   ├── octonion.rs     octonion_mul_n (Fano table, Rayon)
+│   ├── multivector.rs  geometric_product_n (Clifford, Rayon)
+│   └── discover/       formula discovery engine (beam search)
+│
+└── C API (standalone — no Python required)
+    ├── c_api/src/lib.rs   eml_tension, eml_boost, eml_octonion_mul, ...
+    └── c_api/eml_math.h   C header</code></pre>
+
+<h2>Performance</h2>
+<table>
+  <thead><tr><th>Operation</th><th>Python</th><th>Rust (auto)</th><th>Speedup</th></tr></thead>
+  <tbody>
+    <tr><td><code>EMLPoint.boost()</code></td><td>✓</td><td>✓ (leaf nodes)</td><td>~3×</td></tr>
+    <tr><td><code>boost_n()</code> batch</td><td>—</td><td>✓ Rayon parallel</td><td>~8×</td></tr>
+    <tr><td><code>Octonion.__mul__()</code></td><td>✓</td><td>✓ always</td><td>~2×</td></tr>
+    <tr><td><code>EMLMultivector.__mul__()</code></td><td>✓</td><td>✓ n≤8 dims</td><td>~9×</td></tr>
+    <tr><td><code>MetricTensor.christoffel()</code></td><td>✓</td><td>✓ Schwarzschild</td><td>~2×</td></tr>
+  </tbody>
+</table>
+
+</main>
+
+<footer>
+  <p>EML-Math v0.5.0 · MIT License · Andrew K Watts 2026</p>
+  <p>Based on <a href="https://arxiv.org/html/2603.21852v2">Odrzywolek (2026)</a> · CC BY 4.0</p>
+</footer>
+
+</body>
+</html>

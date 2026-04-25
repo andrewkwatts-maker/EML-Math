@@ -5,10 +5,16 @@ mod point;
 mod pair;
 mod knot;
 mod discover;
+mod metric;
+mod octonion;
+mod multivector;
 
 use point::EMLPoint;
 use pair::{EMLPair, schrodinger_step_n, rotate_phase_n};
 use knot::{EMLKnot, simulate_pulses_n};
+use metric::christoffel_batch_n;
+use octonion::octonion_mul_n;
+use multivector::geometric_product_n;
 use discover::search::{search, SearchConfig};
 
 /// Python-facing formula discovery result.
@@ -114,6 +120,9 @@ fn eml_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rotate_phase_n, m)?)?;
     m.add_function(wrap_pyfunction!(simulate_pulses_n, m)?)?;
     m.add_function(wrap_pyfunction!(boost_n, m)?)?;
+    m.add_function(wrap_pyfunction!(christoffel_batch_n, m)?)?;
+    m.add_function(wrap_pyfunction!(octonion_mul_n, m)?)?;
+    m.add_function(wrap_pyfunction!(geometric_product_n, m)?)?;
     // Formula discovery
     m.add_class::<PySearchResult>()?;
     m.add_function(wrap_pyfunction!(find_formula, m)?)?;

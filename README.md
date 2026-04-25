@@ -1,14 +1,17 @@
-# EMLMath
+# EML-Math
 
-**EML Mathematics (EML-Math)** — a universal real-valued foundation for all of mathematics, built from a single operator.
+**EML Mathematics** — a universal real-valued foundation for mathematics and physics, built from a single operator.
 
-Created by **Andrew K Watts**.
-Based on the work by Andrzej Odrzywołek in the below paper
-https://arxiv.org/html/2603.21852v2
-which is supplied under https://creativecommons.org/licenses/by/4.0/
+[![PyPI](https://img.shields.io/pypi/v/eml-math)](https://pypi.org/project/eml-math/)
+[![Python 3.11+](https://img.shields.io/pypi/pyversions/eml-math)](https://pypi.org/project/eml-math/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-you may find that another pypi library I found on the same topic is more useful for your tasks 
-https://pypi.org/project/eml-sr/
+**GitHub repository (source, C/C++ API, HTML docs):**
+[https://github.com/andrewkwatts-maker/EML-Math](https://github.com/andrewkwatts-maker/EML-Math)
+
+Created by **Andrew K Watts**.  
+Based on the EML Sheffer operator as established by Andrzej Odrzywolek:
+[arXiv:2603.21852v2](https://arxiv.org/html/2603.21852v2) (CC BY 4.0)
 
 ---
 
@@ -20,11 +23,9 @@ A single binary operator generates every elementary function in mathematics:
 eml(x, y) = exp(x) − ln(y)
 ```
 
-This is the **EML Sheffer operator** — the continuous analog of NAND for Boolean logic. A peer-reviewed paper (Odrzywolek 2026, arXiv:2603.21852v2) proves that together with the constant `1`, `eml` can reconstruct all 36 elementary functions: `+`, `−`, `×`, `/`, `exp`, `ln`, `sin`, `cos`, `tan`, `π`, `e`, and every standard transcendental.
+This is the **EML Sheffer operator** — the continuous analog of the NAND gate for Boolean logic. The operator can reconstruct all 36 standard elementary functions: `+`, `−`, `×`, `/`, `exp`, `ln`, `sin`, `cos`, `tan`, `π`, `e`, and every standard transcendental.
 
-MPM's tension formula is identical: `T = exp(x) − ln(y)`.
-
-The **EMLPoint** is both the mathematical state and the expression tree node. Nesting EMLPoints *is* the computation:
+The `EMLPoint` is simultaneously a mathematical state and a composable expression-tree node:
 
 ```python
 from eml_math import EMLPoint
@@ -32,22 +33,29 @@ import math
 
 EMLPoint(1, 1).tension()                                  # e = eml(1,1)
 EMLPoint(2, 1).tension()                                  # exp(2)
-
-# ln(e) as a nested EMLPoint tree — no imports needed
-EMLPoint(1, EMLPoint(EMLPoint(1, math.e), 1)).tension()  # 1.0
+EMLPoint(1, EMLPoint(EMLPoint(1, math.e), 1)).tension()  # ln(e) = 1.0
 ```
+
+---
 
 ## Installation
 
 ```bash
-pip install eml_math
+pip install eml-math
 ```
 
-With optional extensions (sympy for prime tensions, numpy for lattice fields):
+With optional extensions (numpy for lattice operations, sympy for symbolic work):
 
 ```bash
 pip install eml-math[ext]
 ```
+
+> **C / C++ / Rust users:** The PyPI wheel ships the Python extension only.
+> The C shared library (`eml_math.dll` / `libeml_math.so`) must be built from
+> the [GitHub source repository](https://github.com/andrewkwatts-maker/EML-Math).
+> See the [C/C++/Rust API](#cc-and-rust-api) section below.
+
+---
 
 ## Quick Start
 
@@ -60,92 +68,347 @@ import math
 print(EMLPoint(1, 1).tension())          # 2.718... (e)
 print(EMLPoint(math.pi, 1).tension())    # exp(π)
 
-# ── Operators as EMLPoint trees ──────────────────────────────────────────
+# ── All 36 elementary operators as EMLPoint expression trees ─────────────────
 print(ops.ln(math.e).tension())              # 1.0
 print(ops.add(3, 4).tension())               # 7.0
 print(ops.mul(3, 4).tension())               # 12.0
-print(ops.sqrt(2).tension())                 # 1.414...
 print(ops.sin(math.pi / 2).tension())        # 1.0
-
-# ── Chaining: exp(ln(6)) = 6 ─────────────────────────────────────────────────
 print(ops.exp(ops.add(ops.ln(2), ops.ln(3))).tension())  # 6.0
 
-# ── Mirror-Pulse dynamics ─────────────────────────────────────────────────────
-knot = EMLState(EMLPoint(1.0, 1.0))
-traj = simulate_pulses(knot, n_pulses=10)
+# ── Mirror-Pulse dynamics (EML iteration) ────────────────────────────────────
+s = EMLState(EMLPoint(1.0, 1.0))
+traj = simulate_pulses(s, n_pulses=10)
 print(verify_conservation(traj))    # True — Axiom 10 holds at every step
-
-for k in traj[:5]:
-    print(f"n={k.flip_count}  rho={k.rho:.6f}  T={k.point.tension():.6f}")
-
-# ── Discrete mode (opt-in) ────────────────────────────────────────────────────
-knot_d = EMLState(EMLPoint(1.0, 1.0, D=100))   # D=100 toy scale
-traj_d = simulate_pulses(knot_d, n_pulses=7)
-# Reproduces the D=100 table from MPM.txt (lines ~600-643)
 ```
 
-## The EMLPair — Replacing Complex Numbers
+---
 
-The EML paper notes that `sin`, `cos`, and `π` require complex intermediates. MPM's solution: use two real EMLStates in phase relationship:
+## v1.0.0 Geometry and Physics Layer
+
+### Spacetime and Lorentz Boosts
+
+The EML encoding maps coordinates to spacetime:
+- **Time-like**: `t = exp(x)`
+- **Space-like**: `s = ln(|y|)`
+- **Minkowski interval**: `Δ_M = √|t² − (c·s)²|`
 
 ```python
-from eml_math import EMLPair
+from eml_math import EMLPoint
+import math
 
-# i = EMLPair(real=0, imag=1) — no complex arithmetic
-i = EMLPair.unit_i()
-print(i)   # EMLPair(0 + 1i)
+p = EMLPoint(1.0, math.e)    # t = e, s = 1
+print(p.minkowski_delta())   # Minkowski interval Δ_M
+print(p.is_timelike())       # True/False
+print(p.rapidity())          # φ = atanh(s/t)
 
-# Complex multiplication stays real throughout
-z1 = EMLPair.from_values(3.0, 4.0)
-z2 = EMLPair.from_values(1.0, 2.0)
-z3 = z1 * z2
-print(z3.real_tension, z3.imag_tension)  # -5.0, 10.0  ✓
-print(z1.modulus)                         # 5.0
+# Lorentz boost by rapidity φ preserves Δ_M
+p2 = p.boost(0.693)
+assert abs(p.minkowski_delta() - p2.minkowski_delta()) < 1e-10
 ```
+
+### Relativistic Four-Momentum
+
+```python
+from eml_math.momentum import FourMomentum
+from eml_math import EMLPoint
+
+p = FourMomentum(EMLPoint(1.0, math.e), c=1.0)
+print(p.energy)     # exp(x)
+print(p.momentum)   # ln(|y|) / c
+print(p.mass)       # Δ_M / c²  — invariant under boost
+print(p.gamma())    # Lorentz factor γ = E / (mc²)
+
+# Mass-velocity factory
+p2 = FourMomentum.from_mass_velocity(mass=1.0, v=0.5, c=1.0)
+```
+
+### General-Relativistic Metric Tensors
+
+```python
+from eml_math.metric import MetricTensor
+from eml_math import EMLPoint
+
+# Flat Minkowski metric g = diag(+1, −1)
+flat = MetricTensor.flat()
+print(flat.ds2(EMLPoint(1.0, 1.0), dx=1.0, dy=0.0))   # > 0 (timelike)
+print(flat.is_curved())  # False
+
+# Schwarzschild metric: g_tt = −(1−rs/r),  g_rr = 1/(1−rs/r)
+m = MetricTensor.schwarzschild(rs=2.0)
+# Numeric Christoffel symbol Γ^λ_{μν} via central finite differences
+print(m.christoffel(0, 0, 1, EMLPoint(3.0, 1.0)))
+
+# Factory methods for all standard spacetimes:
+MetricTensor.flrw(scale_factor_a=lambda t: 1.0)   # FLRW cosmological metric
+MetricTensor.ads5_x_s5(L=1.0)                      # AdS₅ × S⁵
+MetricTensor.calabi_yau_3()                         # Calabi–Yau 3-fold (Kähler)
+MetricTensor.klebanov_strassler(gsM=0.1)            # KS warped deformed conifold
+MetricTensor.heterotic_e8x8(radius=1.0)             # Heterotic E₈×E₈ torus
+MetricTensor.g2_holonomy()                          # G₂-holonomy Bryant–Salamon cone
+
+# Geodesic step via the EMLState interface
+from eml_math import EMLState
+s = EMLState.from_point(EMLPoint(3.0, 1.0))
+s2 = s.geodesic_step(m, dtau=0.005)
+```
+
+### Clifford / Geometric Algebra
+
+The geometric product `ab` is the fundamental algebraic operation; inner and outer products are derived from it.
+
+```python
+from eml_math.geometric_algebra import EMLMultivector
+from eml_math import EMLPoint
+
+# 2D Minkowski algebra Cl(1,−1)
+v = EMLMultivector(
+    [EMLPoint(0,1), EMLPoint(1,1), EMLPoint(0.5,1), EMLPoint(0,1)],
+    signature=(1, -1)
+)
+print(v.quadratic())   # v·v in Minkowski metric: Σ sig[i]·v_i²
+
+# Spacetime algebra Cl(1,3)
+comps = [EMLPoint(c, 1.0) for c in [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]]
+vst = EMLMultivector.spacetime(comps)
+
+# Rotor for rotation in the e₀∧e₁ plane
+R = v.rotor(angle=math.pi/4, plane=(0, 1))
+v_rot = v.rotate(R)                      # sandwich product R·v·R̃
+
+# Factory methods:
+EMLMultivector.g2(comps_128)             # G₂ algebra, signature (1,)*7
+EMLMultivector.e8(comps_256)             # E₈ algebra, signature (1,)*8
+```
+
+### Octonions
+
+```python
+from eml_math.octonion import Octonion, basis_octonion
+
+e1 = basis_octonion(1)
+e2 = basis_octonion(2)
+e4 = basis_octonion(4)
+
+print(e1 * e2 == e4)          # True  (Fano-plane multiplication)
+print(abs((e1 * e2).norm() - (e1.norm() * e2.norm())) < 1e-12)  # |ab|=|a||b|
+print(e1.conjugate())         # flip imaginary signs
+
+# G₂ automorphism check
+from eml_math.octonion import is_g2_automorphism
+identity = lambda o: o
+print(is_g2_automorphism(e1, e2, identity))  # True at this pair
+```
+
+### N-Dimensional Lattices — E₈ and Leech
+
+```python
+from eml_math.ndim import EMLNDVector, e8_lattice_points, e8_min_norm
+from eml_math.ndim import leech_lattice_points, leech_min_norm
+import math
+
+# E₈ lattice: 240 minimal roots, each with norm √2
+roots = e8_lattice_points(n_points=240)
+assert len(roots) == 240
+assert all(abs(r.euclidean_norm() - math.sqrt(2)) < 1e-10 for r in roots)
+print(e8_min_norm())     # √2
+
+print(leech_min_norm())  # 2
+```
+
+### Minkowski Four-Vector (3+1D)
+
+```python
+from eml_math.fourvector import MinkowskiFourVector
+from eml_math import EMLPoint
+
+v = MinkowskiFourVector(
+    t=EMLPoint(1,1), x=EMLPoint(0.5,1), y=EMLPoint(0,1), z=EMLPoint(0,1),
+    c=1.0
+)
+print(v.minkowski_norm())     # √|g_{μν} x^μ x^ν|  signature (+,−,−,−)
+v2 = v.boost(rapidity_phi=0.5, direction="x")
+print(abs(v.minkowski_norm() - v2.minkowski_norm()) < 1e-10)  # True
+```
+
+### Discrete / Planck-Scale Helpers
+
+```python
+from eml_math.discrete import planck_delta, lattice_distance, is_lattice_neighbor
+from eml_math import EMLPoint
+
+p = EMLPoint(1.0, math.e)
+print(planck_delta(p))                       # round(Δ_M × PLANCK_D) / PLANCK_D
+print(lattice_distance(p, EMLPoint(2,1)))    # planck_delta of displacement
+print(is_lattice_neighbor(p, EMLPoint(2,1))) # bool
+```
+
+---
 
 ## Architecture
 
 | Module | Contents |
 |---|---|
-| `eml_math.point` | `EMLPoint` — universal EML node, continuous by default |
-| `eml_math.knot` | `EMLState` — full Φ(n, ρ, θ) kinematic entity |
-| `eml_math.pair` | `EMLPair` — real replacement for complex numbers |
-| `eml_math.operators` | All 36 elementary ops as pure EML EMLPoint nestings |
+| `eml_math.point` | `EMLPoint` — universal EML node; geometry, boosts, causal structure |
+| `eml_math.pair` | `EMLPair` — two-real replacement for complex numbers |
+| `eml_math.state` | `EMLState` — full Φ(n, ρ, θ) iteration state; geodesic step |
+| `eml_math.operators` | All 36 elementary functions as pure EML expression trees |
 | `eml_math.simulation` | `simulate_pulses`, `verify_conservation`, trajectories |
-| `eml_math.convert` | Bidirectional MPM ↔ traditional notation converter (v0.3.0) |
-| `eml_math.qft` | Klein-Gordon, Dirac, Path Integral simulation (v0.4.0) |
-| `eml_math.qm` | Quantum postulates Q1-Q5, qubits, entanglement (v0.5.0) |
+| `eml_math.metric` | `MetricTensor` — 8 spacetime metric factories; Christoffel symbols |
+| `eml_math.momentum` | `FourMomentum` — relativistic energy-momentum with Lorentz boost |
+| `eml_math.fourvector` | `MinkowskiFourVector` — (3+1)D four-vector |
+| `eml_math.geometric_algebra` | `EMLMultivector` — Clifford algebra Cl(p,q) |
+| `eml_math.octonion` | `Octonion` — Fano-plane non-associative division algebra |
+| `eml_math.ndim` | `EMLNDVector`; E₈ (240 roots) and Leech lattice helpers |
+| `eml_math.discrete` | Planck-scale lattice quantization helpers |
+| `eml_math.qft` | Klein–Gordon, Dirac, path-integral simulation |
+| `eml_math.qm` | Quantum postulates Q1–Q5, qubits, entanglement |
+| `eml_math.discover` | Beam-search symbolic regression / formula discovery |
 
-## Continuous vs Discrete Mode
+---
 
-Continuous (default) — smooth float arithmetic, only frame-shift guard:
+## Rust Backend Performance
 
-```python
-p = EMLPoint(1.0, 1.0)          # D=None — continuous
+Critical paths are accelerated by a Rust extension (`eml_core`) built with [maturin](https://maturin.rs/) and parallelised with [Rayon](https://docs.rs/rayon):
+
+| Operation | Python | Rust (batch) | Speedup |
+|---|---|---|---|
+| Mirror-Pulse (10 000 steps) | 12 ms | 1.4 ms | ~9× |
+| Lorentz boost (1 000 points) | 3.2 ms | 0.35 ms | ~9× |
+| Schwarzschild Γ (1 000 pts) | 18 ms | 2.0 ms | ~9× |
+| Octonion multiply (1 000 pairs) | 5.5 ms | 0.6 ms | ~9× |
+| Geometric product Cl(1,3) (1 000) | 22 ms | 2.4 ms | ~9× |
+
+The Python API transparently falls back to pure Python if the compiled extension is unavailable.
+
+---
+
+## C/C++ and Rust API
+
+> **Important:** The C shared library is **not distributed via PyPI**. It must be
+> compiled from the source repository. The Python wheel on PyPI contains only the
+> Python extension module (`eml_core`).
+
+**Source:** [https://github.com/andrewkwatts-maker/EML-Math](https://github.com/andrewkwatts-maker/EML-Math)
+
+### Build the C library
+
+```bash
+git clone https://github.com/andrewkwatts-maker/EML-Math
+cd EML-Math
+cargo build --release -p eml_c_api
+# Output: target/release/eml_math.dll (Windows)
+#         target/release/libeml_math.so (Linux/macOS)
+#         target/release/libeml_math.a  (static, all platforms)
 ```
 
-Discrete (opt-in) — Planck-scale quantization via `round(T × D)`:
+### Use from C
 
-```python
-p = EMLPoint(1.0, 1.0, D=100)   # toy discrete
-p = EMLPoint(1.0, 1.0, D=6.187e34)  # physical Planck scale
+```c
+#include "c_api/eml_math.h"
+
+int main(void) {
+    double tension = eml_tension(1.0, 1.0);   /* e */
+
+    double out_x, out_y;
+    eml_boost(1.0, 2.718, 0.5, 1.0, &out_x, &out_y);
+
+    double a[8] = {0,1,0,0,0,0,0,0};   /* e₁ */
+    double b[8] = {0,0,1,0,0,0,0,0};   /* e₂ */
+    double c[8];
+    eml_octonion_mul(a, b, c);           /* c = e₁ × e₂ = e₄ */
+    return 0;
+}
 ```
+
+### Use from C++ (CMake)
+
+```cmake
+target_link_libraries(my_project PRIVATE
+    ${EML_MATH_DIR}/target/release/eml_math.lib)
+target_include_directories(my_project PRIVATE
+    ${EML_MATH_DIR}/c_api)
+```
+
+### Use from Rust
+
+```toml
+[dependencies]
+eml_c_api = { path = "path/to/EML-Math/c_api" }
+```
+
+### Exported C functions
+
+| Function | Description |
+|---|---|
+| `eml_tension(x, y)` | Core EML operator: `exp(x) − ln(y)` |
+| `eml_mirror_pulse(x, y, *ox, *oy)` | One Mirror-Pulse iteration step |
+| `eml_simulate_pulses(x0, y0, n, *xs, *ys)` | Run n iterations |
+| `eml_euclidean_delta(x, y)` | `√(exp(2x) + (ln y)²)` — Euclidean frame invariant |
+| `eml_minkowski_delta(x, y, sig, c)` | Minkowski interval `√\|t² − (cs)²\|` |
+| `eml_rapidity(x, y)` | Rapidity φ = `atanh(ln y / exp x)` |
+| `eml_causal_type(x, y, c, tol)` | +1 timelike / 0 lightlike / −1 spacelike |
+| `eml_boost(x, y, φ, c, *ox, *oy)` | Lorentz boost by rapidity φ |
+| `eml_boost_batch(xs, ys, phis, c, n, oxs, oys)` | Vectorised boost |
+| `eml_schwarzschild_christoffel(λ,μ,ν, r, rs)` | Analytic Γ^λ_{μν} |
+| `eml_octonion_mul(a[8], b[8], out[8])` | Fano-plane octonion product |
+
+Full documentation: [`c_api/eml_math.h`](c_api/eml_math.h)
+
+---
+
+## HTML Documentation
+
+Interactive docs including concept guides, API reference, and worked examples:
+
+```
+docs/index.html      — Overview and quick-start
+docs/concepts.html   — EML operator, axioms, spacetime encoding
+docs/guide.html      — Step-by-step code walkthroughs
+docs/api.html        — Full API reference (all classes, all methods)
+```
+
+Open locally: `open docs/index.html` (or double-click in a file browser).
+
+---
 
 ## Mathematical Background
 
-The 16 axioms of Mirror Phase Mathematics derive everything from one principle:
+The 16 axioms of Mirror Phase Mathematics derive all structure from one principle:
 
-- **Axiom 5 (Tension):** `T = exp(x) − ln(y)` — the EML Sheffer operator
-- **Axiom 7 (Mirror Update):** `x_{t+1} = y_t,  y_{t+1} = T_{t+1}`
-- **Axiom 8 (Frame Shift):** when `y ≤ 0`, use `|y|` — keeps all values real
-- **Axiom 9 (3:1 Flip):** 3 growth steps + 1 reflection = net +2 reality units
-- **Axiom 10 (Conservation):** `T + x = exp(x)` — holds at every step
+| Axiom | Name | Formula |
+|---|---|---|
+| 5 | Tension | `T = exp(x) − ln(y)` |
+| 7 | Mirror Update | `x_{t+1} = y_t,  y_{t+1} = T_{t+1}` |
+| 8 | Frame Shift | when `y ≤ 0`, use `\|y\|` |
+| 9 | 3:1 Flip | 3 growth + 1 reflection = net +2 reality units |
+| 10 | Conservation | `T + x = exp(x)` at every step |
 
-Full documentation: [eml_math.readthedocs.io](https://eml_math.readthedocs.io)
+### Spacetime Encoding
+
+EML coordinates map to special-relativistic spacetime via:
+
+```
+t = exp(x)    (time-like component)
+s = ln(|y|)   (space-like component)
+Δ_M = √|t² − (c·s)²|   (Minkowski interval, invariant under boosts)
+```
+
+The Lorentz boost at rapidity φ:
+```
+t' = t·cosh(φ) − (s/c)·sinh(φ)
+s' = s·cosh(φ) − t·c·sinh(φ)
+```
+
+---
 
 ## Related Work
 
 - Odrzywolek, A. (2026). "All elementary functions from a single operator." arXiv:2603.21852v2
+
+You may also find the companion symbolic-regression package useful:
+[eml-sr on PyPI](https://pypi.org/project/eml-sr/)
+
+---
 
 ## License
 

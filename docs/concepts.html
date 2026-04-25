@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concepts — EML-Math</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <span class="brand">EML-Math</span>
+  <span class="badge">v0.5.0</span>
+  <a href="index.html">Home</a>
+  <a href="concepts.html">Concepts</a>
+  <a href="guide.html">Guide</a>
+  <a href="api.html">API</a>
+  <a href="https://github.com/andrewkwatts-maker/EML-Math">GitHub</a>
+</nav>
+
+<main>
+
+<h1>Core Concepts</h1>
+
+<h2>The EML Sheffer Operator</h2>
+
+<p>A <strong>Sheffer operator</strong> is a single binary operation from which all other operations in a logical or mathematical system can be derived. For Boolean logic, NAND is the Sheffer stroke. For continuous real-valued mathematics, the EML operator plays the analogous role:</p>
+
+<pre><code>eml(x, y) = exp(x) − ln(y)</code></pre>
+
+<p>Odrzywolek (2026) proved that starting from <code>eml</code> and the constant <code>1</code>, every elementary function can be expressed as a finite composition of <code>eml</code> calls. This includes addition, multiplication, trigonometric functions, logarithms, and transcendentals like <code>π</code> and <code>e</code>.</p>
+
+<div class="callout green">
+  <strong>Key insight:</strong> <code>eml(1, 1) = exp(1) − ln(1) = e</code>. The mathematical constant <em>e</em> emerges naturally from the operator evaluated at its simplest input.
+</div>
+
+<h2>EMLPoint — Computation as State</h2>
+
+<p>An <code>EMLPoint(x, y)</code> is both a mathematical state and an expression tree node. Nesting EMLPoints <em>is</em> the computation — no separate AST class is needed:</p>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+<span class="kw">import</span> math
+
+<span class="cm"># eml(x, y) = exp(x) - ln(y)</span>
+EMLPoint(<span class="num">1</span>, <span class="num">1</span>).tension()          <span class="cm"># e</span>
+EMLPoint(<span class="num">2</span>, <span class="num">1</span>).tension()          <span class="cm"># exp(2)</span>
+
+<span class="cm"># ln(e) encoded as nested EMLPoints</span>
+<span class="cm"># ln(x) = eml(1, eml(eml(1, x), 1)) </span>
+EMLPoint(<span class="num">1</span>, EMLPoint(EMLPoint(<span class="num">1</span>, math.e), <span class="num">1</span>)).tension()  <span class="cm"># 1.0</span></code></pre>
+
+<h3>The Frame-Shift Guard (Axiom 8)</h3>
+<p>When <code>y ≤ 0</code>, <code>ln(y)</code> is undefined. The frame-shift guard automatically uses <code>|y|</code>, keeping all values in the real domain:</p>
+<pre><code>EMLPoint(<span class="num">1</span>, <span class="num">-2</span>).tension()   <span class="cm"># uses |y| = 2  — always real</span></code></pre>
+
+<h3>The Slipping Wheel Guard</h3>
+<p>When <code>x &gt; 709.78</code>, <code>exp(x)</code> would overflow. The Slipping Wheel guard applies <code>x ← ln(x)</code>, dampening the growth back into range:</p>
+<pre><code>EMLPoint(<span class="num">800</span>, <span class="num">1</span>).tension()  <span class="cm"># x=800 → x=ln(800) — no overflow</span></code></pre>
+
+<h2>Mirror-Pulse Iteration</h2>
+
+<p>The Mirror-Pulse is the fundamental time-step of the EML system. One pulse advances the state from <code>(x, y)</code> to <code>(|y|, T)</code> where <code>T = eml(x, y)</code>:</p>
+
+<pre><code>x_{t+1} = |y_t|
+y_{t+1} = exp(x_t) − ln(|y_t|)</code></pre>
+
+<p>This creates a coupled oscillation between the growth coordinate <code>x</code> and the mirror coordinate <code>y</code>:</p>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLState, EMLPoint, simulate_pulses, verify_conservation
+
+s = EMLState(EMLPoint(<span class="num">1.0</span>, <span class="num">1.0</span>))
+traj = simulate_pulses(s, n_pulses=<span class="num">10</span>)
+
+<span class="cm"># Axiom 10: T + ln(y) = exp(x) — always holds</span>
+print(verify_conservation(traj))   <span class="cm"># True</span>
+
+<span class="kw">for</span> st <span class="kw">in</span> traj[:<span class="num">4</span>]:
+    print(f<span class="st">"n={st.flip_count}  rho={st.rho:.4f}"</span>)</code></pre>
+
+<h2>EMLPair — Real Replacement for Complex Numbers</h2>
+
+<p>Complex numbers require two reals. The EML paper notes that <code>sin</code>, <code>cos</code>, and <code>π</code> require complex intermediates. <code>EMLPair</code> solves this using two <code>EMLState</code> objects in phase relationship — pure real arithmetic throughout:</p>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPair
+<span class="kw">import</span> math
+
+<span class="cm"># Complex multiplication — no Python complex type used</span>
+z1 = EMLPair.from_values(<span class="num">3.0</span>, <span class="num">4.0</span>)   <span class="cm"># 3 + 4i</span>
+z2 = EMLPair.from_values(<span class="num">1.0</span>, <span class="num">2.0</span>)   <span class="cm"># 1 + 2i</span>
+z3 = z1 * z2                           <span class="cm"># -5 + 10i</span>
+print(z1.modulus)                      <span class="cm"># 5.0</span>
+print(z1.argument)                     <span class="cm"># arctan(4/3)</span>
+
+<span class="cm"># 4-frame rotation group: {×1, ×i, ×-1, ×-i}</span>
+frames = z1.frames()   <span class="cm"># all 4 have identical Euclidean delta</span></code></pre>
+
+<h2>EML Coordinate Encoding of Spacetime</h2>
+
+<p>In v0.5.0, the EML coordinate pair <code>(x, y)</code> encodes a spacetime event:</p>
+
+<table>
+  <thead><tr><th>EML coordinate</th><th>Physical quantity</th><th>Formula</th></tr></thead>
+  <tbody>
+    <tr><td><code>x</code></td><td>Time-like component</td><td><code>t = exp(x)</code></td></tr>
+    <tr><td><code>y</code></td><td>Space-like component</td><td><code>s = ln(|y|)</code></td></tr>
+    <tr><td>Euclidean Δ</td><td>Frame invariant</td><td><code>√(t² + s²)</code></td></tr>
+    <tr><td>Minkowski Δ_M</td><td>Spacetime interval</td><td><code>√|t² − (c·s)²|</code></td></tr>
+  </tbody>
+</table>
+
+<p>A Lorentz boost by rapidity φ is a hyperbolic rotation in the <code>(t, s)</code> plane:</p>
+<pre><code>t' = t·cosh(φ) − (s/c)·sinh(φ)
+s' = s·cosh(φ) − t·c·sinh(φ)</code></pre>
+
+<p>The Minkowski interval Δ_M is invariant under this transformation — it encodes the rest energy of a particle independent of reference frame.</p>
+
+<h2>The 3:1 Flip Cycle (Axiom 9)</h2>
+
+<p>Each complete cycle consists of 3 growth pulses followed by 1 mirrored reflection. This asymmetry yields a net surplus of <code>FLIP_YIELD = 2</code> reality units per cycle — a discrete analog of the matter-antimatter asymmetry:</p>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLState, EMLPoint
+
+s = EMLState(EMLPoint(<span class="num">1.0</span>, <span class="num">1.0</span>))
+s4 = s.three_one_flip()   <span class="cm"># 4 pulses: 3 growth + 1 reflection</span>
+print(s4.tread_yield())   <span class="cm"># net reality units accumulated</span></code></pre>
+
+<h2>Discrete Mode (Planck Scale)</h2>
+
+<p>Setting <code>D</code> enables discrete quantisation via <code>round(T × D)</code>. At <code>D = PLANCK_D ≈ 6.187 × 10³⁴</code>, the quantization step corresponds to the Planck length:</p>
+
+<pre><code><span class="kw">from</span> eml_math.constants <span class="kw">import</span> PLANCK_D
+<span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+
+p = EMLPoint(<span class="num">1.0</span>, <span class="num">1.0</span>, D=PLANCK_D)   <span class="cm"># Planck-scale discrete mode</span>
+p2 = p.mirror_pulse()                   <span class="cm"># y_new = round(T × D) / D</span></code></pre>
+
+</main>
+
+<footer>
+  <p>EML-Math v0.5.0 · MIT License · Andrew K Watts 2026</p>
+</footer>
+
+</body>
+</html>

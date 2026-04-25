@@ -4,8 +4,8 @@ build-backend = "maturin"
 
 [project]
 name = "eml-math"
-version = "v0.4.0a0"
-description = "Mirror Phase Mathematics: the EML Sheffer operator as a universal real-valued foundation for all elementary mathematics"
+version = "1.0.0"
+description = "EML Mathematics: the EML Sheffer operator eml(x,y)=exp(x)−ln(y) as a universal primitive with geometry, GR metrics, Clifford algebra, octonions, and formula discovery"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -16,15 +16,19 @@ keywords = [
     "physics",
     "eml",
     "sheffer",
-    "tension",
-    "mirror",
-    "quantum",
+    "clifford-algebra",
+    "geometric-algebra",
+    "general-relativity",
+    "octonions",
     "symbolic-regression",
     "formula-discovery",
+    "lorentz",
+    "minkowski",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -33,7 +37,9 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
+    "Operating System :: OS Independent",
 ]
 requires-python = ">=3.11"
 dependencies = [
@@ -59,9 +65,11 @@ ext = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/andrewkwatts/eml"
-Repository = "https://github.com/andrewkwatts/eml"
-"Bug Tracker" = "https://github.com/andrewkwatts/eml/issues"
+Homepage = "https://github.com/andrewkwatts-maker/EML-Math"
+Repository = "https://github.com/andrewkwatts-maker/EML-Math"
+"Bug Tracker" = "https://github.com/andrewkwatts-maker/EML-Math/issues"
+Documentation = "https://github.com/andrewkwatts-maker/EML-Math/blob/main/README.md"
+"C/C++ API" = "https://github.com/andrewkwatts-maker/EML-Math/tree/main/c_api"
 
 [tool.maturin]
 python-source = "src"

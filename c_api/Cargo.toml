@@ -1,0 +1,12 @@
+[package]
+name = "eml_c_api"
+version = "1.0.0"
+edition = "2021"
+description = "C-compatible shared/static library for the EML Sheffer operator"
+
+[lib]
+name = "eml_math"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+# pure C API — no Python runtime required

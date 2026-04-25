@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide — EML-Math</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <span class="brand">EML-Math</span>
+  <span class="badge">v0.5.0</span>
+  <a href="index.html">Home</a>
+  <a href="concepts.html">Concepts</a>
+  <a href="guide.html">Guide</a>
+  <a href="api.html">API</a>
+  <a href="https://github.com/andrewkwatts-maker/EML-Math">GitHub</a>
+</nav>
+
+<main>
+
+<h1>Getting Started Guide</h1>
+
+<h2>1. Installation</h2>
+
+<pre><code>pip install eml-math         <span class="cm"># core library</span>
+pip install eml-math[ext]    <span class="cm"># + NumPy and SymPy</span></code></pre>
+
+<div class="callout">
+  Pre-built wheels are on PyPI for Python 3.10–3.13 on Windows, macOS, and Linux. The Rust backend is included in the wheel — you do <strong>not</strong> need Rust installed.
+</div>
+
+<h2>2. Hello, EML</h2>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+
+<span class="cm"># The single operator</span>
+print(EMLPoint(<span class="num">1</span>, <span class="num">1</span>).eml())    <span class="cm"># e  = 2.71828...</span>
+print(EMLPoint(<span class="num">2</span>, <span class="num">1</span>).eml())    <span class="cm"># exp(2) = 7.38905...</span>
+
+<span class="cm"># All 36 elementary functions via operators.py</span>
+<span class="kw">import</span> eml_math.operators <span class="kw">as</span> ops
+<span class="kw">import</span> math
+
+print(ops.sin(math.pi / <span class="num">6</span>).tension())   <span class="cm"># 0.5</span>
+print(ops.ln(math.e).tension())           <span class="cm"># 1.0</span>
+print(ops.add(<span class="num">2</span>, <span class="num">3</span>).tension())            <span class="cm"># 5.0</span>
+print(ops.mul(<span class="num">4</span>, <span class="num">7</span>).tension())            <span class="cm"># 28.0</span></code></pre>
+
+<h2>3. Mirror-Pulse Dynamics</h2>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLState, EMLPoint, simulate_pulses, verify_conservation
+
+<span class="cm"># Create an initial state</span>
+state = EMLState(EMLPoint(<span class="num">1.0</span>, <span class="num">1.0</span>))
+
+<span class="cm"># Run 20 Mirror-Pulses</span>
+trajectory = simulate_pulses(state, n_pulses=<span class="num">20</span>)
+
+<span class="cm"># Conservation holds at every step (Axiom 10)</span>
+print(verify_conservation(trajectory))   <span class="cm"># True</span>
+
+<span class="cm"># Inspect the trajectory</span>
+<span class="kw">for</span> s <span class="kw">in</span> trajectory[:<span class="num">5</span>]:
+    print(f<span class="st">"n={s.flip_count:2d}  rho={s.rho:.6f}  phase={s.phase:.4f}"</span>)</code></pre>
+
+<h2>4. Complex Arithmetic Without Complex Numbers</h2>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPair
+<span class="kw">import</span> math
+
+<span class="cm"># Build from real and imaginary parts</span>
+z = EMLPair.from_values(<span class="num">3.0</span>, <span class="num">4.0</span>)
+print(z.modulus)     <span class="cm"># 5.0</span>
+print(z.argument)    <span class="cm"># arctan(4/3) ≈ 0.9273</span>
+
+<span class="cm"># Arithmetic</span>
+z2 = EMLPair.from_values(<span class="num">1.0</span>, <span class="num">-1.0</span>)
+print((z * z2).real_tension)   <span class="cm"># 3*1 - 4*(-1) = 7</span>
+print((z + z2).real_tension)   <span class="cm"># 4.0</span>
+
+<span class="cm"># Polar construction</span>
+z3 = EMLPair.from_polar(r=<span class="num">2.0</span>, theta=math.pi/<span class="num">4</span>)
+print(z3.real_tension)   <span class="cm"># 2*cos(π/4) ≈ 1.414</span></code></pre>
+
+<h2>5. Relativistic Geometry</h2>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+<span class="kw">import</span> math
+
+p = EMLPoint(<span class="num">1.0</span>, math.e)
+
+<span class="cm"># Causal classification</span>
+print(p.light_cone_type())      <span class="cm"># "lightlike"</span>
+print(p.minkowski_delta())      <span class="cm"># 0.0</span>
+
+<span class="cm"># Create a timelike point</span>
+p2 = EMLPoint(<span class="num">2.0</span>, math.e)
+print(p2.is_timelike())         <span class="cm"># True</span>
+print(p2.rapidity())            <span class="cm"># atanh(1/e²)</span>
+
+<span class="cm"># Lorentz boost — Minkowski delta is invariant</span>
+p3 = p2.boost(phi=<span class="num">0.693</span>, c=<span class="num">1.0</span>)
+print(abs(p2.minkowski_delta() - p3.minkowski_delta()) < <span class="num">1e-10</span>)  <span class="cm"># True</span>
+
+<span class="cm"># 4-frame (canonical) coordinates</span>
+frame0 = p2.canonical_frame(k=<span class="num">0</span>)   <span class="cm"># (exp(x), ln(y))</span>
+frame1 = p2.canonical_frame(k=<span class="num">1</span>)   <span class="cm"># (-ln(y), exp(x))</span>
+<span class="cm"># All frames have the same Euclidean delta</span></code></pre>
+
+<h2>6. Spacetime Metrics and Geodesics</h2>
+
+<pre><code><span class="kw">from</span> eml_math.metric <span class="kw">import</span> MetricTensor
+<span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint, EMLState
+
+<span class="cm"># Schwarzschild metric (r = exp(x), rs = Schwarzschild radius)</span>
+metric = MetricTensor.schwarzschild(rs=<span class="num">2.0</span>)
+p = EMLPoint(<span class="num">3.0</span>, <span class="num">1.0</span>)   <span class="cm"># r = exp(3) ≈ 20 >> rs=2</span>
+
+<span class="cm"># Christoffel symbol Γ^0_{01} (Rust-accelerated for Schwarzschild)</span>
+print(metric.christoffel(<span class="num">0</span>, <span class="num">0</span>, <span class="num">1</span>, p))
+
+<span class="cm"># Geodesic integration (Euler step)</span>
+state = EMLState.from_point(p)
+<span class="kw">for</span> _ <span class="kw">in</span> range(<span class="num">50</span>):
+    state = state.geodesic_step(metric, dtau=<span class="num">0.005</span>)
+
+<span class="cm"># FLRW cosmology: radiation-era scale factor a(t) ∝ t^0.5</span>
+flrw = MetricTensor.flrw(scale_factor_a=<span class="kw">lambda</span> t: t**<span class="num">0.5</span>)
+g = flrw._g(EMLPoint(<span class="num">0.5</span>, <span class="num">2.0</span>))
+print(g)   <span class="cm"># [[-1, 0], [0, a(t)²]]</span></code></pre>
+
+<h2>7. Four-Momentum</h2>
+
+<pre><code><span class="kw">from</span> eml_math.momentum <span class="kw">import</span> FourMomentum
+
+<span class="cm"># From rest mass + velocity</span>
+fm = FourMomentum.from_mass_velocity(mass=<span class="num">1.0</span>, v=<span class="num">0.8</span>, c=<span class="num">1.0</span>)
+print(f<span class="st">"E={fm.energy:.4f}  p={fm.momentum:.4f}  m={fm.mass:.4f}  γ={fm.gamma():.4f}"</span>)
+<span class="cm"># Mass is Lorentz invariant</span>
+fm2 = fm.boost(phi=<span class="num">0.5</span>)
+print(abs(fm.mass - fm2.mass) < <span class="num">1e-10</span>)   <span class="cm"># True</span></code></pre>
+
+<h2>8. Octonions</h2>
+
+<pre><code><span class="kw">from</span> eml_math.octonion <span class="kw">import</span> basis_octonion, is_g2_automorphism
+
+e1, e2, e4 = basis_octonion(<span class="num">1</span>), basis_octonion(<span class="num">2</span>), basis_octonion(<span class="num">4</span>)
+
+<span class="cm"># Fano-plane rule: e1 * e2 = e4</span>
+result = e1 * e2
+print(result.component(<span class="num">4</span>))   <span class="cm"># 1.0</span>
+
+<span class="cm"># Non-commutativity: e2 * e1 = -e4</span>
+print((e2 * e1).component(<span class="num">4</span>))   <span class="cm"># -1.0</span>
+
+<span class="cm"># Norm is multiplicative</span>
+print(abs((e1 * e2).norm() - e1.norm() * e2.norm()) < <span class="num">1e-9</span>)   <span class="cm"># True</span>
+
+<span class="cm"># Check G₂ automorphism</span>
+print(is_g2_automorphism(e1, e2, <span class="kw">lambda</span> o: o))   <span class="cm"># True (identity)</span></code></pre>
+
+<h2>9. Clifford Algebra</h2>
+
+<pre><code><span class="kw">from</span> eml_math.geometric_algebra <span class="kw">import</span> EMLMultivector
+<span class="kw">from</span> eml_math <span class="kw">import</span> EMLPoint
+<span class="kw">import</span> math
+
+<span class="cm"># 2D Euclidean: signature (1, 1)</span>
+<span class="kw">def</span> <span class="fn">vec2</span>(a, b, sig=(<span class="num">1</span>, <span class="num">1</span>)):
+    comps = [EMLPoint(<span class="num">0.0</span>, <span class="num">1.0</span>)] * <span class="num">4</span>
+    comps[<span class="num">1</span>] = EMLPoint(a, <span class="num">1.0</span>)
+    comps[<span class="num">2</span>] = EMLPoint(b, <span class="num">1.0</span>)
+    <span class="kw">return</span> EMLMultivector(comps, signature=sig)
+
+v = vec2(<span class="num">3.0</span>, <span class="num">4.0</span>)
+print(v.quadratic())   <span class="cm"># 9 + 16 = 25</span>
+
+<span class="cm"># Rotor: rotate by π/4 in the e0∧e1 plane</span>
+R = v.rotor(math.pi / <span class="num">4</span>, plane=(<span class="num">0</span>, <span class="num">1</span>))
+v_rot = v.rotate(R)
+print(abs(v_rot.quadratic() - v.quadratic()) < <span class="num">1e-8</span>)   <span class="cm"># True</span>
+
+<span class="cm"># Spacetime multivector Cl(1,3)</span>
+st = EMLMultivector.spacetime([EMLPoint(<span class="num">0.0</span>, <span class="num">1.0</span>)] * <span class="num">16</span>)</code></pre>
+
+<h2>10. Using the Rust Batch API Directly</h2>
+
+<pre><code><span class="kw">from</span> eml_math <span class="kw">import</span> eml_core
+<span class="kw">import</span> math
+
+<span class="cm"># Batch boost 10k points in parallel (Rayon)</span>
+N = <span class="num">10_000</span>
+points = [(<span class="num">1.0</span>, math.e)] * N
+phis   = [<span class="num">0.5</span>] * N
+boosted = eml_core.boost_n(points, phis, c=<span class="num">1.0</span>)
+
+<span class="cm"># Batch Schwarzschild Christoffel</span>
+results = eml_core.christoffel_batch_n(points, <span class="num">0</span>, <span class="num">0</span>, <span class="num">1</span>, rs=<span class="num">2.0</span>)
+
+<span class="cm"># Direct Rust EMLPoint</span>
+rp = eml_core.EMLPoint(<span class="num">1.0</span>, math.e)
+print(rp.euclidean_delta())
+print(rp.boost(<span class="num">0.5</span>, <span class="num">1.0</span>))</code></pre>
+
+<h2>11. C / C++ Integration</h2>
+
+<pre><code><span class="cm">// Build the C library first:</span>
+<span class="cm">// cargo build --release -p eml_c_api</span>
+
+<span class="cm">// In your C program:</span>
+<span class="kw">#include</span> <span class="st">"eml_math.h"</span>
+<span class="kw">#include</span> <span class="st">&lt;stdio.h&gt;</span>
+
+<span class="kw">int</span> <span class="fn">main</span>(<span class="kw">void</span>) {
+    <span class="kw">double</span> t = <span class="fn">eml_tension</span>(<span class="num">1.0</span>, <span class="num">1.0</span>);   <span class="cm">// e</span>
+    printf(<span class="st">"eml(1,1) = %f\n"</span>, t);
+
+    <span class="kw">double</span> ox, oy;
+    <span class="fn">eml_boost</span>(<span class="num">1.0</span>, <span class="num">2.718</span>, <span class="num">0.5</span>, <span class="num">1.0</span>, &amp;ox, &amp;oy);
+
+    <span class="kw">double</span> e1[<span class="num">8</span>] = {<span class="num">0</span>,<span class="num">1</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>};
+    <span class="kw">double</span> e2[<span class="num">8</span>] = {<span class="num">0</span>,<span class="num">0</span>,<span class="num">1</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>};
+    <span class="kw">double</span> res[<span class="num">8</span>];
+    <span class="fn">eml_octonion_mul</span>(e1, e2, res);   <span class="cm">// res[4] == 1.0</span>
+    <span class="kw">return</span> <span class="num">0</span>;
+}</code></pre>
+
+<pre><code><span class="cm"># Compile</span>
+gcc main.c -Ic_api -Ltarget/release -leml_math -lm -o main
+g++ main.cpp -Ic_api -Ltarget/release -leml_math -lm -o main  <span class="cm"># C++ works too</span></code></pre>
+
+</main>
+
+<footer>
+  <p>EML-Math v0.5.0 · MIT License · Andrew K Watts 2026</p>
+</footer>
+
+</body>
+</html>
