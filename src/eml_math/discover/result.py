@@ -21,12 +21,13 @@ class SearchResult:
     def to_latex(self) -> str:
         return (
             self.formula
+            .replace("eml(", r"\mathrm{eml}(")
             .replace("exp(", r"\exp(")
             .replace("ln(", r"\ln(")
             .replace("sqrt(", r"\sqrt{")
             .replace("sin(", r"\sin(")
             .replace("cos(", r"\cos(")
-            .replace("eml(", r"\mathrm{eml}(")
+            .replace("tan(", r"\tan(")
             .replace("pi", r"\pi")
         )
 

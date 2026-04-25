@@ -192,15 +192,23 @@ def mul(a: _Arg, b: _Arg) -> TensionPoint:
 
 def sqrt(x: _Arg) -> TensionPoint:
     """
-    Square root: √x = exp(ln(x) / 2) = exp(0.5 · ln(x)).
+    Square root: √x = exp(0.5 · ln(x)).
+
+    Uses _ScaleNode to correctly handle x < 1 (where ln(x) < 0 and
+    the pure-EML mul identity exp(ln(a)+ln(b)) would break).
     """
-    return exp(mul(_LitNode(0.5), ln(_t(x))))
+    return exp(_ScaleNode(ln(_t(x)), 0.5))
 
 
 def pow_fn(base: _Arg, exponent: _Arg) -> TensionPoint:
     """
     Power: base^exponent = exp(exponent · ln(base)).
+
+    For a constant exponent uses _ScaleNode; for a symbolic exponent
+    falls back to mul (only valid when ln(base) > 0).
     """
+    if isinstance(exponent, (int, float)):
+        return exp(_ScaleNode(ln(_t(base)), float(exponent)))
     return exp(mul(_t(exponent), ln(_t(base))))
 
 
@@ -390,6 +398,32 @@ def quantize(T: float, D: float) -> int:
 
 
 # ── Helper nodes (practical placeholders, pending Table-1 EML derivations) ────
+
+class _ScaleNode(EMLPoint):
+    """
+    Scalar multiplication: scale * inner.tension().
+
+    mul(c, y) = exp(ln(c) + ln(y)) requires y > 0, so it breaks for negative
+    intermediate values (e.g. ln(x) when x < 1). _ScaleNode sidesteps this
+    by doing direct float multiplication, preserving correct sign.
+    """
+
+    __slots__ = ("_inner", "_scale")
+
+    def __init__(self, inner: EMLPoint, scale: float) -> None:
+        super().__init__(0.0, 1.0, D=None)
+        self._inner = inner
+        self._scale = scale
+
+    def tension(self) -> float:
+        return self._scale * self._inner.tension()
+
+    def is_leaf(self) -> bool:
+        return False
+
+    def __repr__(self) -> str:
+        return f"_ScaleNode({self._inner!r}, {self._scale!r})"
+
 
 class _SubNode(EMLPoint):
     """

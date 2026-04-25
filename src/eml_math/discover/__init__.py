@@ -33,6 +33,12 @@ from typing import Callable, Optional
 
 from eml_math.discover.search import Searcher
 from eml_math.discover.result import SearchResult
+from eml_math.discover.compress import (
+    compress_str,
+    compress_latex,
+    decompress,
+    get,
+)
 
 
 def compress(
@@ -147,4 +153,13 @@ def recognize(value: float) -> Optional[SearchResult]:
     return Searcher().recognize(value)
 
 
-__all__ = ["Searcher", "SearchResult", "compress", "recognize"]
+__all__ = [
+    "Searcher",
+    "SearchResult",
+    "compress",
+    "recognize",
+    "compress_str",
+    "compress_latex",
+    "decompress",
+    "get",
+]

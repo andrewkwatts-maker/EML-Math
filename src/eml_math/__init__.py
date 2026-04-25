@@ -81,7 +81,16 @@ from eml_math.simulation import (
 )
 
 # Formula discovery / equation compression
-from eml_math.discover import Searcher, SearchResult, compress, recognize
+from eml_math.discover import (
+    Searcher,
+    SearchResult,
+    compress,
+    recognize,
+    compress_str,
+    compress_latex,
+    decompress,
+    get,
+)
 
 # v1.0.0 geometry and physics layer
 from eml_math.momentum import FourMomentum
@@ -121,11 +130,15 @@ __all__ = [
     "verify_conservation",
     "frame_shift_count",
     "find_resonance_bands",
-    # Formula discovery
+    # Formula discovery / equation compression
     "Searcher",
     "SearchResult",
     "compress",
     "recognize",
+    "compress_str",
+    "compress_latex",
+    "decompress",
+    "get",
     # Geometry and physics (v1.0.0)
     "FourMomentum",
     "planck_delta",
