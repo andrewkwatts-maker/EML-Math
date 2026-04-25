@@ -13,6 +13,9 @@
  * In Rust (Cargo.toml):
  *   [dependencies]
  *   eml_c_api = { path = "path/to/c_api" }
+ *
+ * Frame-shift guard (Axiom 8): y ≤ 0 is replaced by |y|, so all functions
+ * accepting a y-coordinate are well-defined on the full real line.
  */
 
 #ifndef EML_MATH_H
@@ -39,6 +42,131 @@ void eml_mirror_pulse(double x, double y, double *out_x, double *out_y);
  *  and out_ys[n_pulses+1]. Index 0 stores the initial state. */
 void eml_simulate_pulses(double x0, double y0, size_t n_pulses,
                          double *out_xs, double *out_ys);
+
+/* ─── Elementary arithmetic operators ───────────────────────────────────── */
+
+/** exp(x) = eml(x, 1). Caps x at the overflow threshold (~709.78). */
+double eml_exp(double x);
+
+/** ln(y). Applies frame-shift guard: ln(|y|) for y <= 0. */
+double eml_ln(double y);
+
+/** a + b */
+double eml_add(double a, double b);
+
+/** a - b */
+double eml_sub(double a, double b);
+
+/** a * b */
+double eml_mul(double a, double b);
+
+/** a / b. Returns NaN when |b| < 1e-300. */
+double eml_div(double a, double b);
+
+/** sqrt(|x|) — square root with Axiom-8 absolute value guard. */
+double eml_sqrt(double x);
+
+/** x^2 — squaring. */
+double eml_sqr(double x);
+
+/** |base|^exp — power function with absolute-value base guard. */
+double eml_pow(double base, double exp);
+
+/** -x */
+double eml_neg(double x);
+
+/** 1/x. Returns NaN when |x| < 1e-300. */
+double eml_inv(double x);
+
+/** x / 2. */
+double eml_half(double x);
+
+/** 1 / (1 + exp(-x)) — logistic / sigmoid function. */
+double eml_logistic(double x);
+
+/** sqrt(a^2 + b^2) — hypotenuse without overflow. */
+double eml_hypot(double a, double b);
+
+/** (a + b) / 2 — arithmetic mean. */
+double eml_avg(double a, double b);
+
+/** log_base(x) = ln(x) / ln(base). Returns NaN for base <= 0 or base == 1. */
+double eml_log(double base, double x);
+
+/* ─── Trigonometric functions ────────────────────────────────────────────── */
+
+/** sin(x) */
+double eml_sin(double x);
+
+/** cos(x) */
+double eml_cos(double x);
+
+/** tan(x). Returns NaN near poles (|cos x| < 1e-15). */
+double eml_tan(double x);
+
+/** arcsin(x). Returns NaN for |x| > 1. Range: [-π/2, π/2]. */
+double eml_arcsin(double x);
+
+/** arccos(x). Returns NaN for |x| > 1. Range: [0, π]. */
+double eml_arccos(double x);
+
+/** arctan(x). Range: (-π/2, π/2). */
+double eml_arctan(double x);
+
+/** arctan2(y, x) — four-quadrant arctangent. Range: (-π, π]. */
+double eml_arctan2(double y, double x);
+
+/* ─── Hyperbolic functions ───────────────────────────────────────────────── */
+
+/** sinh(x) = (exp(x) - exp(-x)) / 2 */
+double eml_sinh(double x);
+
+/** cosh(x) = (exp(x) + exp(-x)) / 2 */
+double eml_cosh(double x);
+
+/** tanh(x) */
+double eml_tanh(double x);
+
+/** arsinh(x) = ln(x + sqrt(x^2 + 1)) */
+double eml_arsinh(double x);
+
+/** arcosh(x) = ln(x + sqrt(x^2 - 1)). Returns NaN for x < 1. */
+double eml_arcosh(double x);
+
+/** artanh(x) = ln((1+x)/(1-x)) / 2. Returns NaN for |x| >= 1. */
+double eml_artanh(double x);
+
+/* ─── Batch arithmetic (scalar loops, auto-vectorisable) ─────────────────── */
+
+/** Batch exp: out[i] = eml_exp(xs[i]) for i in [0, n). */
+void eml_exp_batch(size_t n, const double *xs, double *out);
+
+/** Batch ln: out[i] = eml_ln(ys[i]) for i in [0, n). */
+void eml_ln_batch(size_t n, const double *ys, double *out);
+
+/** Batch add: out[i] = as_[i] + bs[i] for i in [0, n). */
+void eml_add_batch(size_t n, const double *as_, const double *bs, double *out);
+
+/** Batch sub: out[i] = as_[i] - bs[i] for i in [0, n). */
+void eml_sub_batch(size_t n, const double *as_, const double *bs, double *out);
+
+/** Batch mul: out[i] = as_[i] * bs[i] for i in [0, n). */
+void eml_mul_batch(size_t n, const double *as_, const double *bs, double *out);
+
+/** Batch div: out[i] = as_[i] / bs[i]. Writes NaN when |bs[i]| < 1e-300. */
+void eml_div_batch(size_t n, const double *as_, const double *bs, double *out);
+
+/** Batch sqrt: out[i] = eml_sqrt(xs[i]) for i in [0, n). */
+void eml_sqrt_batch(size_t n, const double *xs, double *out);
+
+/** Batch sin: out[i] = sin(xs[i]) for i in [0, n). */
+void eml_sin_batch(size_t n, const double *xs, double *out);
+
+/** Batch cos: out[i] = cos(xs[i]) for i in [0, n). */
+void eml_cos_batch(size_t n, const double *xs, double *out);
+
+/** Batch eml_tension: out[i] = eml(xs[i], ys[i]) for i in [0, n). */
+void eml_tension_batch(size_t n, const double *xs, const double *ys, double *out);
 
 /* ─── Geometric invariants ───────────────────────────────────────────────── */
 

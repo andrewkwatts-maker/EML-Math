@@ -1,4 +1,4 @@
-//! C-compatible API for the EML Sheffer operator.
+//! C-compatible API for the EML Sheffer operator library.
 //!
 //! Build as a static or shared library:
 //!   cargo build --release -p eml_c_api
@@ -77,6 +77,251 @@ pub unsafe extern "C" fn eml_simulate_pulses(
         *out_xs.add(i) = x;
         *out_ys.add(i) = y;
     }
+}
+
+// ── Elementary arithmetic operators ──────────────────────────────────────────
+
+/// exp(x) = eml(x, 1). Safe: caps x at overflow threshold.
+#[no_mangle]
+pub extern "C" fn eml_exp(x: c_double) -> c_double {
+    xv_safe(x).exp()
+}
+
+/// ln(y). Safe: applies frame-shift guard for y ≤ 0.
+#[no_mangle]
+pub extern "C" fn eml_ln(y: c_double) -> c_double {
+    y_safe(y).ln()
+}
+
+/// a + b (addition of tension values).
+#[no_mangle]
+pub extern "C" fn eml_add(a: c_double, b: c_double) -> c_double {
+    a + b
+}
+
+/// a - b (subtraction of tension values).
+#[no_mangle]
+pub extern "C" fn eml_sub(a: c_double, b: c_double) -> c_double {
+    a - b
+}
+
+/// a * b (multiplication of tension values).
+#[no_mangle]
+pub extern "C" fn eml_mul(a: c_double, b: c_double) -> c_double {
+    a * b
+}
+
+/// a / b. Returns NaN when |b| < 1e-300.
+#[no_mangle]
+pub extern "C" fn eml_div(a: c_double, b: c_double) -> c_double {
+    if b.abs() < 1e-300 { return f64::NAN; }
+    a / b
+}
+
+/// sqrt(|x|) — square root with Axiom-8 absolute value guard.
+#[no_mangle]
+pub extern "C" fn eml_sqrt(x: c_double) -> c_double {
+    x.abs().sqrt()
+}
+
+/// x² (squaring).
+#[no_mangle]
+pub extern "C" fn eml_sqr(x: c_double) -> c_double {
+    x * x
+}
+
+/// |x|^exp — power function with absolute-value base guard.
+#[no_mangle]
+pub extern "C" fn eml_pow(base: c_double, exp: c_double) -> c_double {
+    base.abs().powf(exp)
+}
+
+/// -x (negation).
+#[no_mangle]
+pub extern "C" fn eml_neg(x: c_double) -> c_double {
+    -x
+}
+
+/// 1/x. Returns NaN when |x| < 1e-300.
+#[no_mangle]
+pub extern "C" fn eml_inv(x: c_double) -> c_double {
+    if x.abs() < 1e-300 { return f64::NAN; }
+    1.0 / x
+}
+
+/// x / 2.
+#[no_mangle]
+pub extern "C" fn eml_half(x: c_double) -> c_double {
+    x * 0.5
+}
+
+/// Logistic function: 1 / (1 + exp(-x)).
+#[no_mangle]
+pub extern "C" fn eml_logistic(x: c_double) -> c_double {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// sqrt(a² + b²) — hypotenuse without overflow.
+#[no_mangle]
+pub extern "C" fn eml_hypot(a: c_double, b: c_double) -> c_double {
+    a.hypot(b)
+}
+
+/// Arithmetic mean: (a + b) / 2.
+#[no_mangle]
+pub extern "C" fn eml_avg(a: c_double, b: c_double) -> c_double {
+    (a + b) * 0.5
+}
+
+/// log_base(x) = ln(x) / ln(base). Returns NaN for invalid base (0, 1, negative).
+#[no_mangle]
+pub extern "C" fn eml_log(base: c_double, x: c_double) -> c_double {
+    if base <= 0.0 || (base - 1.0).abs() < 1e-300 { return f64::NAN; }
+    y_safe(x).ln() / y_safe(base).ln()
+}
+
+// ── Trigonometric functions ───────────────────────────────────────────────────
+
+/// sin(x).
+#[no_mangle]
+pub extern "C" fn eml_sin(x: c_double) -> c_double { x.sin() }
+
+/// cos(x).
+#[no_mangle]
+pub extern "C" fn eml_cos(x: c_double) -> c_double { x.cos() }
+
+/// tan(x). Returns NaN near poles (|cos x| < 1e-15).
+#[no_mangle]
+pub extern "C" fn eml_tan(x: c_double) -> c_double {
+    let c = x.cos();
+    if c.abs() < 1e-15 { return f64::NAN; }
+    x.sin() / c
+}
+
+/// arcsin(x). Returns NaN for |x| > 1.
+#[no_mangle]
+pub extern "C" fn eml_arcsin(x: c_double) -> c_double {
+    if x.abs() > 1.0 { return f64::NAN; }
+    x.asin()
+}
+
+/// arccos(x). Returns NaN for |x| > 1.
+#[no_mangle]
+pub extern "C" fn eml_arccos(x: c_double) -> c_double {
+    if x.abs() > 1.0 { return f64::NAN; }
+    x.acos()
+}
+
+/// arctan(x).
+#[no_mangle]
+pub extern "C" fn eml_arctan(x: c_double) -> c_double { x.atan() }
+
+/// arctan2(y, x) — four-quadrant arctangent.
+#[no_mangle]
+pub extern "C" fn eml_arctan2(y: c_double, x: c_double) -> c_double { y.atan2(x) }
+
+// ── Hyperbolic functions ──────────────────────────────────────────────────────
+
+/// sinh(x) = (exp(x) - exp(-x)) / 2.
+#[no_mangle]
+pub extern "C" fn eml_sinh(x: c_double) -> c_double { x.sinh() }
+
+/// cosh(x) = (exp(x) + exp(-x)) / 2.
+#[no_mangle]
+pub extern "C" fn eml_cosh(x: c_double) -> c_double { x.cosh() }
+
+/// tanh(x).
+#[no_mangle]
+pub extern "C" fn eml_tanh(x: c_double) -> c_double { x.tanh() }
+
+/// arsinh(x) = ln(x + sqrt(x² + 1)).
+#[no_mangle]
+pub extern "C" fn eml_arsinh(x: c_double) -> c_double { x.asinh() }
+
+/// arcosh(x) = ln(x + sqrt(x² - 1)). Returns NaN for x < 1.
+#[no_mangle]
+pub extern "C" fn eml_arcosh(x: c_double) -> c_double {
+    if x < 1.0 { return f64::NAN; }
+    x.acosh()
+}
+
+/// artanh(x) = ln((1+x)/(1-x)) / 2. Returns NaN for |x| >= 1.
+#[no_mangle]
+pub extern "C" fn eml_artanh(x: c_double) -> c_double {
+    if x.abs() >= 1.0 { return f64::NAN; }
+    x.atanh()
+}
+
+// ── Batch arithmetic (auto-vectorisable scalar loops) ─────────────────────────
+
+/// Batch exp: out[i] = eml_exp(xs[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_exp_batch(n: usize, xs: *const c_double, out: *mut c_double) {
+    for i in 0..n { *out.add(i) = eml_exp(*xs.add(i)); }
+}
+
+/// Batch ln: out[i] = eml_ln(ys[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_ln_batch(n: usize, ys: *const c_double, out: *mut c_double) {
+    for i in 0..n { *out.add(i) = eml_ln(*ys.add(i)); }
+}
+
+/// Batch add: out[i] = as_[i] + bs[i] for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_add_batch(
+    n: usize, as_: *const c_double, bs: *const c_double, out: *mut c_double,
+) {
+    for i in 0..n { *out.add(i) = *as_.add(i) + *bs.add(i); }
+}
+
+/// Batch sub: out[i] = as_[i] - bs[i] for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_sub_batch(
+    n: usize, as_: *const c_double, bs: *const c_double, out: *mut c_double,
+) {
+    for i in 0..n { *out.add(i) = *as_.add(i) - *bs.add(i); }
+}
+
+/// Batch mul: out[i] = as_[i] * bs[i] for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_mul_batch(
+    n: usize, as_: *const c_double, bs: *const c_double, out: *mut c_double,
+) {
+    for i in 0..n { *out.add(i) = *as_.add(i) * *bs.add(i); }
+}
+
+/// Batch div: out[i] = as_[i] / bs[i]. Writes NaN when |bs[i]| < 1e-300.
+#[no_mangle]
+pub unsafe extern "C" fn eml_div_batch(
+    n: usize, as_: *const c_double, bs: *const c_double, out: *mut c_double,
+) {
+    for i in 0..n { *out.add(i) = eml_div(*as_.add(i), *bs.add(i)); }
+}
+
+/// Batch sqrt: out[i] = eml_sqrt(xs[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_sqrt_batch(n: usize, xs: *const c_double, out: *mut c_double) {
+    for i in 0..n { *out.add(i) = eml_sqrt(*xs.add(i)); }
+}
+
+/// Batch sin: out[i] = sin(xs[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_sin_batch(n: usize, xs: *const c_double, out: *mut c_double) {
+    for i in 0..n { *out.add(i) = (*xs.add(i)).sin(); }
+}
+
+/// Batch cos: out[i] = cos(xs[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_cos_batch(n: usize, xs: *const c_double, out: *mut c_double) {
+    for i in 0..n { *out.add(i) = (*xs.add(i)).cos(); }
+}
+
+/// Batch eml_tension: out[i] = eml(xs[i], ys[i]) for i in 0..n.
+#[no_mangle]
+pub unsafe extern "C" fn eml_tension_batch(
+    n: usize, xs: *const c_double, ys: *const c_double, out: *mut c_double,
+) {
+    for i in 0..n { *out.add(i) = eml_tension(*xs.add(i), *ys.add(i)); }
 }
 
 // ── Geometric invariants ──────────────────────────────────────────────────────

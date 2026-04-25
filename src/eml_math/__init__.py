@@ -20,6 +20,17 @@ EMLMultivector      — Clifford algebra Cl(p,q) with geometric product
 Octonion            — 8-component non-associative normed division algebra
 EMLNDVector         — N-dimensional EML lattice vector; E₈ and Leech lattice helpers
 
+Formula output formats
+----------------------
+``decompress(result, fmt=...)`` supports six rendering targets:
+
+- ``"math"``    — clean standard notation  ``exp(x) - ln(x)``
+- ``"latex"``   — LaTeX commands           ``\\exp(x) - \\ln(x)``  (for ``$...$``)
+- ``"mathjax"`` — inline MathJax           ``\\( \\exp(x) - \\ln(x) \\)``
+- ``"mathml"``  — MathML markup            ``<math>...</math>``
+- ``"python"``  — runnable Python          ``import math; f = lambda x: ...``
+- ``"eml"``     — raw EML formula string
+
 C / C++ / Rust API
 ------------------
 The compiled Python wheel does not include the C shared library.
@@ -30,6 +41,15 @@ To build ``eml_math.dll`` / ``libeml_math.so`` from source:
     cargo build --release -p eml_c_api
 
 The generated header ``c_api/eml_math.h`` documents all exported functions.
+New in v1.0.0: full arithmetic (eml_exp, eml_ln, eml_add, eml_mul, eml_div,
+eml_sqrt, eml_pow, eml_neg, eml_inv, eml_sin, eml_cos, eml_tan, eml_sinh,
+eml_cosh, eml_tanh, …) plus batch variants (eml_exp_batch, eml_mul_batch, …).
+
+Rust batch API (Python)
+-----------------------
+``eml_math.eml_core`` exposes Rayon-parallel batch operators:
+``exp_n``, ``ln_n``, ``add_n``, ``sub_n``, ``mul_n``, ``div_n``,
+``sqrt_n``, ``sin_n``, ``cos_n``, ``tension_n``, ``pow_n``.
 
 Quick start
 -----------

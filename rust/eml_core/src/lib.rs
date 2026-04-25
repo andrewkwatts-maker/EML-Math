@@ -109,6 +109,86 @@ fn boost_n(points: Vec<(f64, f64)>, phis: Vec<f64>, c: f64) -> Vec<(f64, f64)> {
         .collect()
 }
 
+// ── Batch arithmetic operators (Rayon parallel) ───────────────────────────────
+
+const OVERFLOW_THRESHOLD: f64 = 709.78;
+
+#[inline]
+fn y_safe(y: f64) -> f64 { if y <= 0.0 { y.abs().max(1e-300) } else { y } }
+
+#[inline]
+fn xv_safe(x: f64) -> f64 { if x > OVERFLOW_THRESHOLD { x.ln() } else { x } }
+
+/// Batch exp: [exp(x) for x in xs] — Rayon parallel.
+#[pyfunction]
+fn exp_n(xs: Vec<f64>) -> Vec<f64> {
+    xs.par_iter().map(|&x| xv_safe(x).exp()).collect()
+}
+
+/// Batch ln: [ln(y) for y in ys] — Rayon parallel, frame-shift guard applied.
+#[pyfunction]
+fn ln_n(ys: Vec<f64>) -> Vec<f64> {
+    ys.par_iter().map(|&y| y_safe(y).ln()).collect()
+}
+
+/// Batch add: [a + b for (a, b) in zip(as_, bs)] — Rayon parallel.
+#[pyfunction]
+fn add_n(as_: Vec<f64>, bs: Vec<f64>) -> Vec<f64> {
+    as_.par_iter().zip(bs.par_iter()).map(|(a, b)| a + b).collect()
+}
+
+/// Batch sub: [a - b for (a, b) in zip(as_, bs)] — Rayon parallel.
+#[pyfunction]
+fn sub_n(as_: Vec<f64>, bs: Vec<f64>) -> Vec<f64> {
+    as_.par_iter().zip(bs.par_iter()).map(|(a, b)| a - b).collect()
+}
+
+/// Batch mul: [a * b for (a, b) in zip(as_, bs)] — Rayon parallel.
+#[pyfunction]
+fn mul_n(as_: Vec<f64>, bs: Vec<f64>) -> Vec<f64> {
+    as_.par_iter().zip(bs.par_iter()).map(|(a, b)| a * b).collect()
+}
+
+/// Batch div: [a / b] — NaN for |b| < 1e-300 — Rayon parallel.
+#[pyfunction]
+fn div_n(as_: Vec<f64>, bs: Vec<f64>) -> Vec<f64> {
+    as_.par_iter().zip(bs.par_iter()).map(|(a, b)| {
+        if b.abs() < 1e-300 { f64::NAN } else { a / b }
+    }).collect()
+}
+
+/// Batch sqrt: [sqrt(|x|) for x in xs] — Rayon parallel.
+#[pyfunction]
+fn sqrt_n(xs: Vec<f64>) -> Vec<f64> {
+    xs.par_iter().map(|&x| x.abs().sqrt()).collect()
+}
+
+/// Batch sin: [sin(x) for x in xs] — Rayon parallel.
+#[pyfunction]
+fn sin_n(xs: Vec<f64>) -> Vec<f64> {
+    xs.par_iter().map(|&x| x.sin()).collect()
+}
+
+/// Batch cos: [cos(x) for x in xs] — Rayon parallel.
+#[pyfunction]
+fn cos_n(xs: Vec<f64>) -> Vec<f64> {
+    xs.par_iter().map(|&x| x.cos()).collect()
+}
+
+/// Batch eml_tension: [eml(x, y) for (x, y) in zip(xs, ys)] — Rayon parallel.
+#[pyfunction]
+fn tension_n(xs: Vec<f64>, ys: Vec<f64>) -> Vec<f64> {
+    xs.par_iter().zip(ys.par_iter()).map(|(&x, &y)| {
+        xv_safe(x).exp() - y_safe(y).ln()
+    }).collect()
+}
+
+/// Batch pow: [|base|^exp for (base, exp) in zip(bases, exps)] — Rayon parallel.
+#[pyfunction]
+fn pow_n(bases: Vec<f64>, exps: Vec<f64>) -> Vec<f64> {
+    bases.par_iter().zip(exps.par_iter()).map(|(b, e)| b.abs().powf(*e)).collect()
+}
+
 #[pymodule]
 fn eml_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Core types
@@ -120,6 +200,18 @@ fn eml_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rotate_phase_n, m)?)?;
     m.add_function(wrap_pyfunction!(simulate_pulses_n, m)?)?;
     m.add_function(wrap_pyfunction!(boost_n, m)?)?;
+    // Batch arithmetic operators
+    m.add_function(wrap_pyfunction!(exp_n, m)?)?;
+    m.add_function(wrap_pyfunction!(ln_n, m)?)?;
+    m.add_function(wrap_pyfunction!(add_n, m)?)?;
+    m.add_function(wrap_pyfunction!(sub_n, m)?)?;
+    m.add_function(wrap_pyfunction!(mul_n, m)?)?;
+    m.add_function(wrap_pyfunction!(div_n, m)?)?;
+    m.add_function(wrap_pyfunction!(sqrt_n, m)?)?;
+    m.add_function(wrap_pyfunction!(sin_n, m)?)?;
+    m.add_function(wrap_pyfunction!(cos_n, m)?)?;
+    m.add_function(wrap_pyfunction!(tension_n, m)?)?;
+    m.add_function(wrap_pyfunction!(pow_n, m)?)?;
     m.add_function(wrap_pyfunction!(christoffel_batch_n, m)?)?;
     m.add_function(wrap_pyfunction!(octonion_mul_n, m)?)?;
     m.add_function(wrap_pyfunction!(geometric_product_n, m)?)?;

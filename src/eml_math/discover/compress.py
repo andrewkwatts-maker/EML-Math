@@ -364,9 +364,13 @@ def decompress(
             Clean standard notation: ``exp(x) - ln(x)``.
         ``"latex"``
             LaTeX with proper command names: ``\\exp(x) - \\ln(x)``.
-            Ready for ``$...$`` / ``\\(...\\)`` / MathJax rendering.
+            Ready for ``$...$`` / ``\\(...\\)`` delimiters.
+        ``"mathjax"``
+            LaTeX wrapped in MathJax inline delimiters ``\\( ... \\)``.
+            Paste directly into HTML served with MathJax loaded.
         ``"mathml"``
             MathML markup string (inline ``<math>`` element).
+            Renderable by browsers natively or via MathJax/KaTeX.
         ``"python"``
             Runnable Python: ``import math; f = lambda x: math.exp(x) - ...``
         ``"eml"``
@@ -390,8 +394,10 @@ def decompress(
         return result.to_python()
     if fmt == "latex":
         return result.to_latex()
+    if fmt == "mathjax":
+        return result.to_mathjax()
     if fmt == "mathml":
-        return _formula_to_mathml(result.formula)
+        return result.to_mathml()
     # Default: clean "math" notation
     return _formula_to_math(result.formula)
 
