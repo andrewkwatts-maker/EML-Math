@@ -7,7 +7,7 @@ Instead of z = a + bi (complex arithmetic), use:
 All arithmetic is defined as EML compositions via operators.py.
 All intermediate and final values are strictly real.
 
-This is MPM's answer to the EML paper's statement that "a continuous Sheffer
+This is EML's approach to the paper's statement that "a continuous Sheffer
 working purely in the real domain seems impossible" (arXiv:2603.21852v2, §5).
 The pair encodes what would be complex arithmetic as two real tensions,
 using the frame-shift mechanism to keep all values in the real domain.

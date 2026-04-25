@@ -51,7 +51,7 @@ def evolve_eigenstate(
         e^{−iφ} = cos(φ) − i·sin(φ)
     followed by complex multiplication.
 
-    MPM replaces both steps with one call:
+    EML replaces both steps with one call:
         state.rotate(−E·t/ħ)
 
     The result is identical — the difference is conceptual clarity.

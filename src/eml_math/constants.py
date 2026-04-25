@@ -1,5 +1,5 @@
 """
-Physical and mathematical constants for Mirror Phase Mathematics.
+Physical and mathematical constants for EML Mathematics.
 
 All values are pure definitions — no computation here.
 """
@@ -23,7 +23,7 @@ PLANCK_LENGTH: float = 1.616255e-35
 PLANCK_ENERGY: float = 1.956e9
 """Planck energy in Joules."""
 
-# ── EML / MPM dynamics ────────────────────────────────────────────────────────
+# ── EML dynamics ─────────────────────────────────────────────────────────────
 
 FLIP_YIELD: int = 2
 """Net reality units created per complete 3:1 Flip cycle (Axiom 9)."""

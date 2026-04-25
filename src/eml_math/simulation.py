@@ -30,7 +30,8 @@ def simulate_pulses(
         Number of Mirror-Pulse iterations to run.
     precision : str
         "float" (default) or "mpmath" for arbitrary-precision arithmetic.
-        mpmath mode requires D to be set and mpmath to be installed.
+        mpmath mode requires D to be set and the optional precision extra:
+        ``pip install eml-math[precision]``
 
     Returns
     -------
@@ -76,7 +77,7 @@ def quantized_trajectory(
         a_{t+1} = b_t
         b_{t+1} = round(T_{t+1} * D)
 
-    This is the pure discrete formulation from MPM.txt, independent of
+    This is the pure discrete formulation from the EML discrete specification, independent of
     EMLState. Useful for reproducing the D=100 table from the document.
 
     Parameters
@@ -192,7 +193,7 @@ def find_resonance_bands(
     """
     Find step pairs (i, j) where the two knots resonate (Axiom 14).
 
-    Resonance: tension ratios match — the MPM analog of equality.
+    Resonance: tension ratios match — the EML analog of equality.
     Only checks pairs within the trajectory (not exhaustive cross-product).
 
     Returns

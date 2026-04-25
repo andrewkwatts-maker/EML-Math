@@ -13,7 +13,7 @@ The key insight
 ---------------
 Standard QM uses complex numbers for amplitudes. Every complex operation:
 
-    Traditional                     MPM (EMLPair)
+    Traditional                     EML (EMLPair)
     ──────────────────────────────────────────────────────────
     i · ψ                           psi.rotate_phase(π/2)
     e^{iθ} · ψ                      psi.rotate_phase(θ)
@@ -121,9 +121,9 @@ class Qubit:
 
     All single-qubit gates are implemented using EMLPair.rotate_phase().
     The imaginary unit i appears only as a rotation angle ±π/2 — never as
-    a Python value. This is the central simplification MPM offers for QM.
+    a Python value. This is the central simplification EML offers for QM.
 
-    Gate summary (standard vs MPM)
+    Gate summary (standard vs EML)
     ───────────────────────────────────────────────────────────
     σ_x            flip α↔β                   (no phase)
     σ_z            β → −β                     (negate β)
@@ -189,7 +189,7 @@ class Qubit:
         σ_y = [[0, −i], [i, 0]].
 
         Standard QM: requires complex multiplication by ±i.
-        MPM: rotate_phase(±π/2) — the imaginary unit is a rotation angle.
+        EML: rotate_phase(±π/2) — the imaginary unit is a rotation angle.
 
             σ_y|ψ⟩: new_α = −i·β = β.rotate_phase(−π/2)
                     new_β = +i·α = α.rotate_phase(+π/2)

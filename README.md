@@ -44,10 +44,12 @@ EMLPoint(1, EMLPoint(EMLPoint(1, math.e), 1)).tension()  # ln(e) = 1.0
 pip install eml-math
 ```
 
-With optional extensions (numpy for lattice operations, sympy for symbolic work):
+With optional extensions:
 
 ```bash
-pip install eml-math[ext]
+pip install eml-math[ext]        # numpy + sympy (lattice ops, symbolic work)
+pip install eml-math[precision]  # mpmath (arbitrary-precision simulation mode)
+pip install eml-math[dev]        # pytest, ruff, mypy
 ```
 
 > **C / C++ / Rust users:** The PyPI wheel ships the Python extension only.
@@ -373,7 +375,7 @@ Open locally: `open docs/index.html` (or double-click in a file browser).
 
 ## Mathematical Background
 
-The 16 axioms of Mirror Phase Mathematics derive all structure from one principle:
+The 16 axioms of EML Mathematics derive all structure from one principle:
 
 | Axiom | Name | Formula |
 |---|---|---|

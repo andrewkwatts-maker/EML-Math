@@ -220,7 +220,7 @@ class SchrodingerField:
         |E(t)⟩ = e^{−iEt/ħ}|E(0)⟩
 
     In standard QM this requires complex exponentiation via Euler's formula.
-    In MPM this is just:
+    In EML this is just:
 
         psi_t = psi_0.rotate_phase(−E * t / hbar)
 
@@ -277,7 +277,7 @@ class SchrodingerField:
         """
         One potential-phase step: ψ_n → e^{−iV_n·dt/ħ} · ψ_n.
 
-        In MPM: ψ_n.rotate_phase(−V_n·dt/ħ).
+        In EML: ψ_n.rotate_phase(−V_n·dt/ħ).
 
         This is the potential half of the Trotter split-operator method.
         The complex exponential e^{−iVt/ħ} is a pure phase rotation —
@@ -371,7 +371,7 @@ class PathIntegral:
     Standard action (for comparison):
         S_harm[path] = Σ [m(φ_{t+1}−φ_t)²/(2dt) + m·ω²·dt·φ_t²/2]
 
-    EML action (MPM's native lattice action):
+    EML action (EML's native lattice action):
         S_EML[path] = Σ eml(|φ_t|, |φ_{t+1}|) = Σ exp(|φ_t|) − ln(|φ_{t+1}|)
 
     Both compute Z = Σ_paths exp(−S[path]) via Monte Carlo.

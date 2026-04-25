@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "eml-math"
 version = "1.0.0"
-description = "EML Mathematics: the EML Sheffer operator eml(x,y)=exp(x)−ln(y) as a universal primitive with geometry, GR metrics, Clifford algebra, octonions, and formula discovery"
+description = "Exp-Minus-Log Mathematics: the EML Sheffer operator eml(x,y)=exp(x)−ln(y) as a universal real-valued foundation for all elementary mathematics"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [
@@ -42,11 +42,12 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.11"
-dependencies = [
-    "mpmath>=1.3.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
+precision = [
+    "mpmath>=1.3.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov",

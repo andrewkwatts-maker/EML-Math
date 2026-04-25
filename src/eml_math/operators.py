@@ -248,7 +248,7 @@ def const_half() -> float:
 # sin, cos, tan and their inverses use paired TensionPoints (EMLPair) to
 # compute via Euler's formula without complex arithmetic:
 #   exp(ix) = cos(x) + i·sin(x)
-# In MPM: the "imaginary" component is tracked as a second real EMLPoint.
+# In EML: the "imaginary" component is tracked as a second real EMLPoint.
 # The pairing keeps all values strictly real throughout.
 
 def _euler_pair(x: float) -> tuple[float, float]:

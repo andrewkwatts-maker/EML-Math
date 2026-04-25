@@ -8,7 +8,7 @@ Coordinates can be floats or other TensionPoints, making nesting natural:
     exp = EMLPoint(x, 1).tension()
     ln  = EMLPoint(1, EMLPoint(EMLPoint(1, x), 1)).tension()
 
-This is both the state representation (MPM Axioms 5-8) and the expression tree
+This is both the state representation (EML Axioms 5-8) and the expression tree
 node — no separate AST class is needed.
 
 Modes
@@ -100,8 +100,8 @@ class EMLPoint:
         """
         Compute eml(x, y) = exp(x) - ln(y).
 
-        This is the EML Sheffer operator (arXiv:2603.21852v2) and MPM's
-        fundamental tension formula (Axiom 5).
+        This is the EML Sheffer operator (arXiv:2603.21852v2),
+        the fundamental tension formula (Axiom 5).
 
         The frame-shift guard makes this always real: if y ≤ 0, uses |y|.
 
@@ -228,7 +228,7 @@ class EMLPoint:
         """
         Axiom 14: Two points resonate if their tension ratios are equal.
 
-        Resonance is the MPM analog of equality — dynamic phase-matching.
+        Resonance is the EML analog of equality — dynamic phase-matching.
         """
         t1 = self.tension()
         t2 = other.tension()

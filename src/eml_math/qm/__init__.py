@@ -1,5 +1,5 @@
 """
-MPM Quantum Mechanics — TensionPair replaces Python complex throughout.
+EML Quantum Mechanics — TensionPair replaces Python complex throughout.
 
 All quantum operations map to TensionPair rotations:
     i · ψ                →  psi.rotate_phase(π/2)
