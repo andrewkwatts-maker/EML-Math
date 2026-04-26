@@ -499,6 +499,32 @@ def mirror_abs(x: float) -> float:
     return abs(x)
 
 
+# ── Literal constructors (for use in eml_description eval namespaces) ─────────
+
+def eml_scalar(x) -> TensionPoint:
+    """Wrap a numeric literal as an EML leaf node."""
+    return _LitNode(float(x))
+
+
+def eml_pi() -> TensionPoint:
+    """π as an EML leaf node."""
+    return _LitNode(math.pi)
+
+
+def eml_vec(name: str) -> TensionPoint:
+    """
+    Symbolic vector reference — placeholder that raises KeyError.
+
+    In evaluation contexts, replace this with a context-bound version:
+        eml_vec = lambda name: _LitNode(context[name])
+    Use EMLEvaluator from eml_math.evaluator to bind a real value dict.
+    """
+    raise KeyError(
+        f"eml_vec('{name}'): no value context bound. "
+        "Use EMLEvaluator(context).eval(expr) to supply parameter values."
+    )
+
+
 def quantize(T: float, D: float) -> int:
     """
     round(T * D) — discrete-mode quantization step.

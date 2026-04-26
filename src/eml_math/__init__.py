@@ -121,9 +121,16 @@ from eml_math.octonion import Octonion, basis_octonion
 from eml_math.fourvector import MinkowskiFourVector
 from eml_math.geometric_algebra import EMLMultivector
 
+# Exceptional algebra layer (v1.1.0)
+from eml_math.freudenthal import FreudenthalTripleSystem
+from eml_math.e7_56 import E7_56
+from eml_math.e8_248 import E8_248, E8xE8
+from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
+from eml_math.operators import eml_scalar, eml_pi, eml_vec
+
 iterate = simulate_pulses
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "Andrew K Watts"
 
 __all__ = [
@@ -172,4 +179,9 @@ __all__ = [
     "basis_octonion",
     "MinkowskiFourVector",
     "EMLMultivector",
+    # Exceptional algebra (v1.1.0)
+    "FreudenthalTripleSystem",
+    "E7_56",
+    "E8_248",
+    "E8xE8",
 ]
