@@ -406,6 +406,85 @@ def logistic(x: _Arg) -> TensionPoint:
     return inv(add(_LitNode(1.0), exp(neg(_t(x)))))
 
 
+# ── Aliases (alternative naming conventions) ──────────────────────────────────
+
+#: ops.pow(base, exp) — alias for pow_fn.
+pow = pow_fn
+
+#: ops.asin(x) — alias for arcsin.
+asin = arcsin
+
+#: ops.log(x) — natural logarithm, alias for ln.
+log = ln
+
+
+# ── Additional operators ──────────────────────────────────────────────────────
+
+def mod(a: _Arg, b: _Arg) -> TensionPoint:
+    """
+    Modulo: a mod b (IEEE 754 remainder via math.fmod).
+
+    Returns a - b * trunc(a / b). Handles negative a or b correctly.
+    """
+    av = _t(a).tension()
+    bv = _t(b).tension()
+    if abs(bv) < 1e-300:
+        bv = math.copysign(1e-300, bv)
+    return _LitNode(math.fmod(av, bv))
+
+
+def id(x: _Arg) -> TensionPoint:  # noqa: A001
+    """
+    Identity: id(x) = x. Returns x unchanged as a TensionPoint.
+
+    Used as a display/no-op wrapper in formula trees.
+    Shadows Python's built-in id() intentionally within this module.
+    """
+    return _t(x)
+
+
+def eq(a: _Arg, b: _Arg) -> TensionPoint:
+    """
+    Equality indicator: 1.0 if a ≈ b (within 1e-10), 0.0 otherwise.
+
+    Used as a boolean indicator in symbolic formula trees.
+    """
+    av = _t(a).tension()
+    bv = _t(b).tension()
+    return _LitNode(1.0 if abs(av - bv) <= 1e-10 else 0.0)
+
+
+def apply(f, x: _Arg) -> TensionPoint:
+    """
+    Function application: apply(f, x) = f(x).
+
+    If f is callable (Python function/lambda), evaluates f(x.tension()).
+    If f is a TensionPoint/EMLPoint, returns f (x is ignored — display only).
+    Used primarily as a symbolic display operator in EML formula trees.
+    """
+    xv = _t(x)
+    if callable(f):
+        return _LitNode(float(f(xv.tension())))
+    if isinstance(f, EMLPoint):
+        return f
+    return _LitNode(float(f))
+
+
+def sum_n(term: _Arg, n_start: _Arg, n_end: _Arg) -> TensionPoint:
+    """
+    Symbolic finite sum: ∑_{n=n_start}^{n_end} term.
+
+    For display in EML formula trees. Evaluates as term × count, which is exact
+    when term is constant w.r.t. n and a representative proxy otherwise
+    (for symbolic sums over index-dependent sequences, use Python summation).
+    """
+    tv = _t(term).tension()
+    ns = int(round(_t(n_start).tension()))
+    ne = int(round(_t(n_end).tension()))
+    count = max(ne - ns + 1, 1)
+    return _LitNode(tv * count)
+
+
 # ── Non-EML primitives (explicitly flagged) ───────────────────────────────────
 
 def mirror_abs(x: float) -> float:
