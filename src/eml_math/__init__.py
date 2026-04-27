@@ -127,6 +127,7 @@ from eml_math.e7_56 import E7_56
 from eml_math.e8_248 import E8_248, E8xE8
 from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
 from eml_math.operators import eml_scalar, eml_pi, eml_vec
+from eml_math.tree import EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree
 
 iterate = simulate_pulses
 
@@ -184,4 +185,16 @@ __all__ = [
     "E7_56",
     "E8_248",
     "E8xE8",
+    # EML expression tree (v1.1.0)
+    "EMLTreeNode",
+    "NodeKind",
+    "EML_EXPANSIONS",
+    "parse_eml_tree",
+    # Evaluator
+    "EMLEvaluator",
+    "eml_eval",
+    "ParseError",
+    "eml_scalar",
+    "eml_pi",
+    "eml_vec",
 ]
