@@ -312,6 +312,104 @@ class TestSVG:
 
 
 # ---------------------------------------------------------------------------
+# Pure EML mode — every internal node is the binary primitive eml(L, R)
+# ---------------------------------------------------------------------------
+
+class TestPureEmlMode:
+    @staticmethod
+    def _all_internal_eml(node):
+        if not node.children:
+            return True
+        if node.label != "eml":
+            return False
+        return all(TestPureEmlMode._all_internal_eml(c) for c in node.children)
+
+    def test_exp_becomes_eml_x_one(self):
+        t = parse_eml_tree("EML: ops.exp(eml_scalar(2.0))", pure_eml=True)
+        assert t.label == "eml"
+        assert len(t.children) == 2
+        assert t.children[0].label == "2"
+        assert t.children[1].label == "1"
+        assert t.children[1].kind == NodeKind.SCALAR
+
+    def test_ln_uses_three_nested_eml(self):
+        t = parse_eml_tree("EML: ops.ln(eml_vec('y'))", pure_eml=True)
+        # ln(y) = eml(⊥, eml(eml(⊥, y), 1))
+        assert t.label == "eml"
+        assert t.children[0].kind == NodeKind.BOTTOM
+        mid = t.children[1]
+        assert mid.label == "eml"
+        inner = mid.children[0]
+        assert inner.label == "eml"
+        assert inner.children[0].kind == NodeKind.BOTTOM
+        assert inner.children[1].label == "y"
+        assert mid.children[1].label == "1"
+
+    def test_neg_uses_two_nested_eml(self):
+        t = parse_eml_tree("EML: ops.neg(eml_vec('x'))", pure_eml=True)
+        # neg(x) = eml(⊥, eml(x, 1))
+        assert t.label == "eml"
+        assert t.children[0].kind == NodeKind.BOTTOM
+        inner = t.children[1]
+        assert inner.label == "eml"
+        assert inner.children[0].label == "x"
+        assert inner.children[1].label == "1"
+
+    def test_sub_pure_form(self):
+        # sub(u, v): outer eml( pure_ln(u), eml(v, 1) )
+        t = parse_eml_tree("EML: ops.sub(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        assert t.label == "eml"
+        # right leg is exp(v) = eml(v, 1)
+        right = t.children[1]
+        assert right.label == "eml"
+        assert right.children[0].label == "b"
+        assert right.children[1].label == "1"
+
+    def test_mul_all_internal_eml(self):
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        assert self._all_internal_eml(t)
+
+    def test_div_all_internal_eml(self):
+        t = parse_eml_tree("EML: ops.div(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        assert self._all_internal_eml(t)
+
+    def test_pow_all_internal_eml(self):
+        t = parse_eml_tree(
+            "EML: ops.pow(eml_vec('x'), eml_scalar(2.0))", pure_eml=True
+        )
+        assert self._all_internal_eml(t)
+
+    def test_sqrt_all_internal_eml(self):
+        t = parse_eml_tree("EML: ops.sqrt(eml_vec('x'))", pure_eml=True)
+        assert self._all_internal_eml(t)
+
+    def test_inv_all_internal_eml(self):
+        t = parse_eml_tree("EML: ops.inv(eml_vec('x'))", pure_eml=True)
+        assert self._all_internal_eml(t)
+
+    def test_leaves_preserved(self):
+        t = parse_eml_tree("EML: eml_scalar(7.0)", pure_eml=True)
+        assert t.label == "7"
+        assert t.kind == NodeKind.SCALAR
+
+    def test_pure_implies_expand(self):
+        # pure_eml=True overrides expand_eml=False
+        t = parse_eml_tree(
+            "EML: ops.mul(eml_vec('a'), eml_vec('b'))",
+            pure_eml=True,
+            expand_eml=False,
+        )
+        assert t.label == "eml"
+
+    def test_to_dict_serializable(self):
+        import json
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        s = json.dumps(t.to_dict())
+        assert '"label": "eml"' in s
+        assert '"bottom"' in s
+
+
+# ---------------------------------------------------------------------------
 # Parse error handling
 # ---------------------------------------------------------------------------
 

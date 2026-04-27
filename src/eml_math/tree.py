@@ -83,13 +83,14 @@ _PRIMITIVES: frozenset = frozenset({"eml", "exp", "ln"})
 
 
 class NodeKind:
-    PRIMITIVE  = "primitive"   # exp, ln  (EML atomic)
+    PRIMITIVE  = "primitive"   # exp, ln, eml  (EML atomic)
     STRUCTURAL = "structural"  # add, sub, neg, scale  (EML scaffolding)
     COMPOUND   = "compound"    # sin, cos … (no EML expansion defined yet)
     SCALAR     = "scalar"      # eml_scalar(x)
     VEC        = "vec"         # eml_vec('name')
     PI         = "pi"          # eml_pi()
     CONST      = "const"       # bare numeric literal
+    BOTTOM     = "bottom"      # ⊥ sentinel — exp(⊥) = 0  (used in pure-eml mode)
     UNKNOWN    = "unknown"
 
 
@@ -147,13 +148,14 @@ class EMLTreeNode:
     _PAD  = 24
 
     _COLORS = {
-        NodeKind.PRIMITIVE:  ("#D35400", "#FEF0E7"),   # amber — exp / ln
+        NodeKind.PRIMITIVE:  ("#D35400", "#FEF0E7"),   # amber — exp / ln / eml
         NodeKind.STRUCTURAL: ("#5D6D7E", "#F2F3F4"),   # slate — add/sub/neg/scale
         NodeKind.COMPOUND:   ("#2E86C1", "#EBF5FB"),   # blue  — sin/cos/…
         NodeKind.SCALAR:     ("#1E8449", "#EAFAF1"),   # green
         NodeKind.VEC:        ("#7D3C98", "#F5EEF8"),   # purple
         NodeKind.PI:         ("#7D3C98", "#F5EEF8"),   # purple
         NodeKind.CONST:      ("#1E8449", "#EAFAF1"),   # green
+        NodeKind.BOTTOM:     ("#922B21", "#FDEDEC"),   # red — ⊥ sentinel
         NodeKind.UNKNOWN:    ("#7F8C8D", "#F2F3F4"),
     }
 
@@ -256,7 +258,12 @@ def _esc(s: str) -> str:
 
 # ── AST → EMLTreeNode (with optional EML expansion) ─────────────────────────
 
-def parse_eml_tree(eml_description: str, *, expand_eml: bool = True) -> EMLTreeNode:
+def parse_eml_tree(
+    eml_description: str,
+    *,
+    expand_eml: bool = True,
+    pure_eml: bool = False,
+) -> EMLTreeNode:
     """
     Parse an ``eml_description`` string into an :class:`EMLTreeNode` tree.
 
@@ -269,6 +276,13 @@ def parse_eml_tree(eml_description: str, *, expand_eml: bool = True) -> EMLTreeN
         form — ``mul(a,b)`` becomes ``exp → add → [ln(a), ln(b)]``.
         If *False* compact ops-level tree is returned (``mul``, ``pow`` etc.
         shown as single nodes with EML-form annotations).
+    pure_eml :
+        If *True* every internal node becomes the binary primitive
+        ``eml(L, R) = exp(L) − ln(R)``. ``exp``, ``ln``, ``add``, ``sub``,
+        ``neg``, ``scale`` are recursively re-expressed in terms of nested
+        ``eml`` calls using the sentinel leaves ``⊥`` (where ``exp(⊥) = 0``)
+        and ``1`` (where ``ln(1) = 0``). Trees become deeper but the only
+        internal-node label is ``eml``. Implies ``expand_eml=True``.
 
     Example
     -------
@@ -287,7 +301,12 @@ def parse_eml_tree(eml_description: str, *, expand_eml: bool = True) -> EMLTreeN
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as exc:
         return EMLTreeNode(label=f"<parse error: {exc}>", kind=NodeKind.UNKNOWN)
-    return _ast_to_node(tree.body, expand_eml=expand_eml)
+    if pure_eml:
+        expand_eml = True
+    node = _ast_to_node(tree.body, expand_eml=expand_eml)
+    if pure_eml:
+        node = _to_pure_eml(node)
+    return node
 
 
 # ── Primitive node builders ───────────────────────────────────────────────────
@@ -434,6 +453,91 @@ def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # 
         return EMLTreeNode(label="(…)", kind=NodeKind.UNKNOWN, children=children)
 
     return EMLTreeNode(label=ast.dump(node)[:30], kind=NodeKind.UNKNOWN)
+
+
+# ── Pure-eml conversion ───────────────────────────────────────────────────────
+#
+# Every internal node becomes the binary primitive  eml(L, R) = exp(L) − ln(R).
+# Sentinel leaves:
+#   ⊥  (BOTTOM)  →  exp(⊥) ≡ 0   (lets us strip the exp leg)
+#   1  (SCALAR)  →  ln(1)  ≡ 0   (lets us strip the ln  leg)
+#
+# Atomic conversions (verify by substituting):
+#   exp(x)   = eml(x, 1)
+#   ln(y)    = eml(⊥, eml(eml(⊥, y), 1))             [3 nested]
+#   neg(x)   = eml(⊥, eml(x, 1))                      [2 nested]
+#   sub(u,v) = eml( pure_ln(u),  eml(v, 1) )          [u − v via L=ln u, R=exp v]
+#   add(u,v) = eml( pure_ln(u),  eml(eml(⊥, eml(v,1)), 1) )   [u − (−v)]
+#   ×c · x   = mul(c, x) = expand to exp(add(ln c, ln x))  then recurse
+#   compound (sin, cos, …) — unexpandable; left as-is
+
+def _bot() -> EMLTreeNode:
+    return EMLTreeNode(label="⊥", kind=NodeKind.BOTTOM)
+
+def _one() -> EMLTreeNode:
+    return EMLTreeNode(label="1", kind=NodeKind.SCALAR)
+
+def _bin_eml(L: EMLTreeNode, R: EMLTreeNode) -> EMLTreeNode:
+    return EMLTreeNode(
+        label="eml",
+        kind=NodeKind.PRIMITIVE,
+        children=[L, R],
+        eml_form="exp(L) − ln(R)",
+    )
+
+def _pure_ln(y: EMLTreeNode) -> EMLTreeNode:
+    """ln(y) = eml(⊥, eml(eml(⊥, y), 1))."""
+    return _bin_eml(_bot(), _bin_eml(_bin_eml(_bot(), y), _one()))
+
+def _pure_neg(x: EMLTreeNode) -> EMLTreeNode:
+    """neg(x) = eml(⊥, eml(x, 1))."""
+    return _bin_eml(_bot(), _bin_eml(x, _one()))
+
+
+def _to_pure_eml(n: EMLTreeNode) -> EMLTreeNode:
+    """Recursively rewrite ``n`` so every internal node is ``eml(L, R)``."""
+    if not n.children:
+        return n  # leaf — pass through
+
+    cc = [_to_pure_eml(c) for c in n.children]
+    label = n.label
+
+    if label == "exp" and len(cc) == 1:
+        return _bin_eml(cc[0], _one())
+
+    if label == "ln" and len(cc) == 1:
+        return _pure_ln(cc[0])
+
+    if label == "neg" and len(cc) == 1:
+        return _pure_neg(cc[0])
+
+    if label == "sub" and len(cc) == 2:
+        u, v = cc
+        # u − v = exp(ln u) − ln(exp v)
+        return _bin_eml(_pure_ln(u), _bin_eml(v, _one()))
+
+    if label == "add" and len(cc) == 2:
+        u, v = cc
+        # u + v = u − (−v) = exp(ln u) − ln(exp(−v))
+        exp_neg_v = _bin_eml(_pure_neg(v), _one())
+        return _bin_eml(_pure_ln(u), exp_neg_v)
+
+    if label.startswith("×"):
+        # scale(c, x) = c · x = mul(c, x) = exp(add(ln c, ln x))
+        c_str = label[1:]
+        c_leaf = EMLTreeNode(label=c_str, kind=NodeKind.SCALAR)
+        x = cc[0] if cc else _one()
+        # rebuild as expanded tree, then recurse
+        expanded = _exp(_add(_ln(c_leaf), _ln(x)))
+        return _to_pure_eml(expanded)
+
+    if label == "eml" and len(cc) == 2:
+        return _bin_eml(cc[0], cc[1])
+
+    # compound (sin/cos/…) — no closed-form pure-eml encoding; keep node
+    return EMLTreeNode(
+        label=n.label, kind=n.kind, children=cc, eml_form=n.eml_form,
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
