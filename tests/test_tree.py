@@ -312,6 +312,121 @@ class TestSVG:
 
 
 # ---------------------------------------------------------------------------
+# LaTeX rendering
+# ---------------------------------------------------------------------------
+
+class TestToLatex:
+    # Compact mode (preserves ops labels) — straightforward
+    def test_compact_mul(self):
+        t = parse_eml_tree(
+            "EML: ops.mul(eml_vec('a'), eml_vec('b'))", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == r"a \cdot b"
+
+    def test_compact_div(self):
+        t = parse_eml_tree(
+            "EML: ops.div(eml_vec('a'), eml_vec('b'))", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == r"\frac{a}{b}"
+
+    def test_compact_pow(self):
+        t = parse_eml_tree(
+            "EML: ops.pow(eml_vec('x'), eml_scalar(2.0))", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == r"x^{2}"
+
+    def test_compact_sqrt(self):
+        t = parse_eml_tree(
+            "EML: ops.sqrt(eml_vec('x'))", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == r"\sqrt{x}"
+
+    def test_compact_sin(self):
+        t = parse_eml_tree(
+            "EML: ops.sin(eml_pi())", expand_eml=False
+        )
+        s = t.to_latex()
+        assert r"\sin" in s and r"\pi" in s
+
+    def test_greek_substitution(self):
+        t = parse_eml_tree(
+            "EML: ops.mul(eml_scalar(2.0), eml_vec('phi'))", expand_eml=False
+        )
+        s = t.to_latex()
+        assert r"\varphi" in s
+
+    def test_subscript_underscore(self):
+        t = parse_eml_tree(
+            "EML: eml_vec('V_cb')", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == "V_{cb}"
+
+    def test_dotted_path_strips_prefix(self):
+        t = parse_eml_tree(
+            "EML: eml_vec('ckm.V_us')", expand_eml=False
+        )
+        s = t.to_latex()
+        assert s == "V_{us}"
+
+    # Expanded mode — recognise compact patterns
+    def test_expanded_mul_collapses(self):
+        # exp(add(ln a, ln b)) should render as a · b, not literal exp/ln
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))")
+        s = t.to_latex()
+        assert s == r"a \cdot b"
+
+    def test_expanded_div_collapses(self):
+        t = parse_eml_tree("EML: ops.div(eml_vec('a'), eml_vec('b'))")
+        s = t.to_latex()
+        assert s == r"\frac{a}{b}"
+
+    def test_expanded_pow_collapses(self):
+        t = parse_eml_tree("EML: ops.pow(eml_vec('x'), eml_scalar(3.0))")
+        s = t.to_latex()
+        assert s == r"x^{3}"
+
+    def test_expanded_sqrt_collapses(self):
+        t = parse_eml_tree("EML: ops.sqrt(eml_vec('y'))")
+        s = t.to_latex()
+        assert s == r"\sqrt{y}"
+
+    def test_expanded_inv_collapses(self):
+        t = parse_eml_tree("EML: ops.inv(eml_vec('x'))")
+        s = t.to_latex()
+        assert s == r"\frac{1}{x}"
+
+    # Pure-eml mode — recognise the sentinel patterns
+    def test_pure_exp(self):
+        # eml(x, 1) → e^x
+        t = parse_eml_tree(
+            "EML: ops.exp(eml_scalar(1.0))", pure_eml=True
+        )
+        s = t.to_latex()
+        assert s == r"e^{1}"
+
+    def test_pure_ln(self):
+        # 3-nested eml encoding → ln(y)
+        t = parse_eml_tree(
+            "EML: ops.ln(eml_vec('y'))", pure_eml=True
+        )
+        s = t.to_latex()
+        assert r"\ln" in s and "y" in s
+
+    def test_pure_neg(self):
+        # eml(⊥, eml(x, 1)) → -x
+        t = parse_eml_tree(
+            "EML: ops.neg(eml_vec('x'))", pure_eml=True
+        )
+        s = t.to_latex()
+        assert "-" in s and "x" in s
+
+
+# ---------------------------------------------------------------------------
 # Pure EML mode — every internal node is the binary primitive eml(L, R)
 # ---------------------------------------------------------------------------
 

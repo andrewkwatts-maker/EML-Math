@@ -138,6 +138,21 @@ class EMLTreeNode:
         return d
 
     # ------------------------------------------------------------------
+    # LaTeX
+    # ------------------------------------------------------------------
+
+    def to_latex(self) -> str:
+        """Render this tree as a LaTeX math expression.
+
+        Works on any expansion mode (compact, expanded, pure-eml). For pure-eml
+        and expanded trees the renderer will recognise common patterns
+        (``exp(x) − ln(y)`` ⇒ ``e^x − \\ln y``, ``exp(add(ln a, ln b))`` ⇒
+        ``a \\cdot b`` etc.) and emit conventional notation rather than a
+        literal expansion.
+        """
+        return _render_latex(self, parent_prec=0)
+
+    # ------------------------------------------------------------------
     # SVG
     # ------------------------------------------------------------------
 
@@ -453,6 +468,234 @@ def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # 
         return EMLTreeNode(label="(…)", kind=NodeKind.UNKNOWN, children=children)
 
     return EMLTreeNode(label=ast.dump(node)[:30], kind=NodeKind.UNKNOWN)
+
+
+# ── LaTeX rendering ───────────────────────────────────────────────────────────
+#
+# Operator precedence (LaTeX): atom (10) > pow (8) > unary (6) > mul/div (5)
+# > add/sub (4) > eml (3). Higher precedence binds tighter; parens needed when
+# child precedence < parent precedence (or = with right-assoc on left, etc).
+
+_PREC = {
+    "atom":  10,
+    "func":  9,    # \sin(...), \exp(...) etc — always parenthesised by braces
+    "pow":   8,
+    "unary": 6,
+    "mul":   5,
+    "div":   5,
+    "add":   4,
+    "sub":   4,
+    "eml":   3,
+}
+
+
+def _wrap(s: str, child_prec: int, parent_prec: int) -> str:
+    return s if child_prec >= parent_prec else r"\left(" + s + r"\right)"
+
+
+def _name_to_latex(name: str) -> str:
+    """Heuristic conversion of identifier → LaTeX symbol."""
+    # strip dotted prefix: ``ckm.V_cb`` → ``V_cb``
+    if "." in name:
+        name = name.rsplit(".", 1)[-1]
+    # special tokens
+    specials = {
+        "pi":     r"\pi",
+        "phi":    r"\varphi",
+        "theta":  r"\theta",
+        "alpha":  r"\alpha",
+        "beta":   r"\beta",
+        "gamma":  r"\gamma",
+        "delta":  r"\delta",
+        "lambda": r"\lambda",
+        "sigma":  r"\sigma",
+        "omega":  r"\omega",
+        "tau":    r"\tau",
+        "rho":    r"\rho",
+        "mu":     r"\mu",
+        "nu":     r"\nu",
+        "epsilon":r"\varepsilon",
+        "Lambda": r"\Lambda",
+        "Omega":  r"\Omega",
+        "Sigma":  r"\Sigma",
+        "Phi":    r"\Phi",
+        "psi":    r"\psi",
+        "Psi":    r"\Psi",
+        "chi":    r"\chi",
+        "kappa":  r"\kappa",
+        "zeta":   r"\zeta",
+        "eta":    r"\eta",
+        "xi":     r"\xi",
+    }
+    if name in specials:
+        return specials[name]
+    # split on underscore for sub/superscripts: a_b_c → a_{b,c}
+    if "_" in name:
+        head, *rest = name.split("_")
+        head_tex = specials.get(head, head)
+        sub = ",".join(rest)
+        return f"{head_tex}_{{{sub}}}"
+    return name
+
+
+def _scalar_to_latex(label: str) -> str:
+    if label == "π":   return r"\pi"
+    if label == "e":   return r"e"
+    if label == "⊥":   return r"\bot"
+    # number — keep as-is, but escape LaTeX specials minimally
+    return label
+
+
+def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
+    label = n.label
+    kind  = n.kind
+    cc    = n.children
+
+    # ── leaves ───────────────────────────────────────────────────────────────
+    if not cc:
+        if kind == NodeKind.VEC:
+            return _name_to_latex(label)
+        if kind == NodeKind.PI:
+            return r"\pi"
+        if kind == NodeKind.BOTTOM:
+            return r"\bot"
+        # scalar / const — strip leading "-" handling
+        if label.startswith("-") and len(label) > 1:
+            return _wrap("-" + _scalar_to_latex(label[1:]), _PREC["unary"], parent_prec)
+        return _scalar_to_latex(label)
+
+    # ── pure-eml binary primitive: eml(L, R) = e^L − ln R ────────────────────
+    # Recognise common collapsed patterns BEFORE falling back to the literal form.
+    if label == "eml" and len(cc) == 2:
+        L, R = cc
+        # eml(x, 1)  →  e^x
+        if R.kind == NodeKind.SCALAR and R.label == "1" and not R.children:
+            inner = _render_latex(L, _PREC["atom"])
+            return _wrap(f"e^{{{inner}}}", _PREC["pow"], parent_prec)
+        # eml(⊥, eml(eml(⊥, y), 1))  →  ln(y)
+        if (L.kind == NodeKind.BOTTOM
+            and R.label == "eml" and len(R.children) == 2
+            and R.children[1].kind == NodeKind.SCALAR and R.children[1].label == "1"
+            and R.children[0].label == "eml" and len(R.children[0].children) == 2
+            and R.children[0].children[0].kind == NodeKind.BOTTOM):
+            y = R.children[0].children[1]
+            inner = _render_latex(y, _PREC["func"])
+            return f"\\ln {inner}"
+        # eml(⊥, eml(x, 1))  →  -x      (the pure-form of neg(x))
+        if (L.kind == NodeKind.BOTTOM
+            and R.label == "eml" and len(R.children) == 2
+            and R.children[1].kind == NodeKind.SCALAR and R.children[1].label == "1"):
+            x = R.children[0]
+            inner = _render_latex(x, _PREC["unary"])
+            return _wrap(f"-{inner}", _PREC["unary"], parent_prec)
+        # generic: e^L − ln R
+        Ls = _render_latex(L, _PREC["atom"])
+        Rs = _render_latex(R, _PREC["func"])
+        s  = f"e^{{{Ls}}} - \\ln {Rs}"
+        return _wrap(s, _PREC["sub"], parent_prec)
+
+    # ── primitives & structural (expanded mode) ──────────────────────────────
+    if label == "exp" and len(cc) == 1:
+        # exp(add(ln a, ln b)) → a · b   (mul collapse)
+        c = cc[0]
+        if c.label == "add" and len(c.children) == 2 \
+                and c.children[0].label == "ln" and c.children[1].label == "ln":
+            a = _render_latex(c.children[0].children[0], _PREC["mul"])
+            b = _render_latex(c.children[1].children[0], _PREC["mul"])
+            return _wrap(f"{a} \\cdot {b}", _PREC["mul"], parent_prec)
+        # exp(sub(ln a, ln b)) → a / b
+        if c.label == "sub" and len(c.children) == 2 \
+                and c.children[0].label == "ln" and c.children[1].label == "ln":
+            a = _render_latex(c.children[0].children[0], 0)
+            b = _render_latex(c.children[1].children[0], 0)
+            return f"\\frac{{{a}}}{{{b}}}"
+        # exp(scale(c, ln x)) → x^c
+        if c.label.startswith("×") and len(c.children) == 1 and c.children[0].label == "ln":
+            cval = c.label[1:]
+            x = _render_latex(c.children[0].children[0], _PREC["atom"])
+            if cval == "0.5":
+                return f"\\sqrt{{{x}}}"
+            if cval == "2":
+                return _wrap(f"{x}^{{2}}", _PREC["pow"], parent_prec)
+            return _wrap(f"{x}^{{{cval}}}", _PREC["pow"], parent_prec)
+        # exp(neg(ln x)) → 1/x
+        if c.label == "neg" and len(c.children) == 1 and c.children[0].label == "ln":
+            x = _render_latex(c.children[0].children[0], 0)
+            return f"\\frac{{1}}{{{x}}}"
+        # generic exp(x)
+        inner = _render_latex(c, _PREC["atom"])
+        return _wrap(f"e^{{{inner}}}", _PREC["pow"], parent_prec)
+
+    if label == "ln" and len(cc) == 1:
+        inner = _render_latex(cc[0], _PREC["func"])
+        return f"\\ln {inner}"
+
+    if label == "add" and len(cc) >= 2:
+        parts = [_render_latex(c, _PREC["add"]) for c in cc]
+        return _wrap(" + ".join(parts), _PREC["add"], parent_prec)
+
+    if label == "sub" and len(cc) >= 2:
+        # left-associative: a - b - c = (a - b) - c
+        parts = [_render_latex(cc[0], _PREC["sub"])]
+        for c in cc[1:]:
+            parts.append(_render_latex(c, _PREC["sub"] + 1))
+        return _wrap(" - ".join(parts), _PREC["sub"], parent_prec)
+
+    if label == "neg" and len(cc) == 1:
+        inner = _render_latex(cc[0], _PREC["unary"])
+        return _wrap(f"-{inner}", _PREC["unary"], parent_prec)
+
+    if label.startswith("×") and len(cc) == 1:
+        c = label[1:]
+        x = _render_latex(cc[0], _PREC["mul"])
+        return _wrap(f"{c} \\cdot {x}", _PREC["mul"], parent_prec)
+
+    # ── compact-mode operator labels ─────────────────────────────────────────
+    if label in ("mul", "mul_n") and len(cc) >= 2:
+        parts = [_render_latex(c, _PREC["mul"]) for c in cc]
+        return _wrap(" \\cdot ".join(parts), _PREC["mul"], parent_prec)
+
+    if label in ("div", "div_n") and len(cc) == 2:
+        a = _render_latex(cc[0], 0)
+        b = _render_latex(cc[1], 0)
+        return f"\\frac{{{a}}}{{{b}}}"
+
+    if label in ("pow", "pow_fn") and len(cc) == 2:
+        x = _render_latex(cc[0], _PREC["atom"])
+        n_pow = _render_latex(cc[1], 0)
+        return _wrap(f"{x}^{{{n_pow}}}", _PREC["pow"], parent_prec)
+
+    if label in ("sqrt", "sqrt_n") and len(cc) == 1:
+        x = _render_latex(cc[0], 0)
+        return f"\\sqrt{{{x}}}"
+
+    if label == "sqr" and len(cc) == 1:
+        x = _render_latex(cc[0], _PREC["atom"])
+        return _wrap(f"{x}^{{2}}", _PREC["pow"], parent_prec)
+
+    if label == "inv" and len(cc) == 1:
+        x = _render_latex(cc[0], 0)
+        return f"\\frac{{1}}{{{x}}}"
+
+    if label == "abs" and len(cc) == 1:
+        x = _render_latex(cc[0], 0)
+        return f"\\left|{x}\\right|"
+
+    # trig & logs — use \name{...}
+    _funcs = {
+        "sin": r"\sin", "cos": r"\cos", "tan": r"\tan",
+        "asin": r"\arcsin", "acos": r"\arccos", "atan": r"\arctan",
+        "sinh": r"\sinh", "cosh": r"\cosh", "tanh": r"\tanh",
+        "log": r"\log", "log_fn": r"\log",
+    }
+    if label in _funcs and len(cc) >= 1:
+        fname = _funcs[label]
+        x = _render_latex(cc[0], _PREC["func"])
+        return f"{fname} {x}"
+
+    # ── fallback: function-style render ──────────────────────────────────────
+    args = ", ".join(_render_latex(c, 0) for c in cc)
+    return f"\\mathrm{{{label}}}\\left({args}\\right)"
 
 
 # ── Pure-eml conversion ───────────────────────────────────────────────────────

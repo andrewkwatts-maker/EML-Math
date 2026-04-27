@@ -167,7 +167,11 @@ class EMLEvaluator:
 
     def _namespace(self) -> dict:
         return {
-            "ops": ops,
+            # Sign-aware ops shim — keeps the log-space EML algebra pure
+            # internally but extracts and re-applies sign at the operator
+            # boundary so expressions like ops.mul(ops.neg(...), x) give
+            # the correct numeric result.
+            "ops": _SignedOps,
             "math": math,
             # Return plain floats so ops.pow(x, eml_scalar(n)) uses the
             # _ScaleNode path (correct for fractional/negative exponents).
@@ -175,6 +179,70 @@ class EMLEvaluator:
             "eml_pi": lambda: math.pi,
             "eml_vec": self._eml_vec,
         }
+
+
+# ---------------------------------------------------------------------------
+# Sign-aware operator shim
+# ---------------------------------------------------------------------------
+#
+# Pure EML defines  mul(a,b) = exp(ln a + ln b)  —  which is only valid for
+# positive a, b. When an eml_description writes  ops.mul(ops.neg(x), y)  the
+# inner neg flips the sign and the outer mul would then take ln of a negative
+# number and silently lose the sign.
+#
+# This shim wraps the affected ops so they extract the sign separately:
+#   mul(a, b)  →  sign(a)*sign(b) * pure_mul(|a|, |b|)
+#   div(a, b)  →  same with /
+#   pow(x, n)  →  sign-correct for integer exponents
+#
+# All other ops pass through unchanged.
+
+def _to_float(x: Any) -> float:
+    if isinstance(x, EMLPoint):
+        return x.tension()
+    return float(x)
+
+
+class _SignedOpsMeta(type):
+    """All-static-method passthrough to ops.* with sign-aware overrides."""
+
+    def __getattr__(cls, name: str):
+        return getattr(ops, name)
+
+
+class _SignedOps(metaclass=_SignedOpsMeta):
+    @staticmethod
+    def mul(a: Any, b: Any) -> float:
+        af, bf = _to_float(a), _to_float(b)
+        if af == 0.0 or bf == 0.0:
+            return 0.0
+        sign = (1 if af > 0 else -1) * (1 if bf > 0 else -1)
+        magnitude = ops.mul(abs(af), abs(bf))
+        return sign * _to_float(magnitude)
+
+    @staticmethod
+    def div(a: Any, b: Any) -> float:
+        af, bf = _to_float(a), _to_float(b)
+        if bf == 0.0:
+            # delegate to ops.div so it produces whatever the algebra says
+            return _to_float(ops.div(a, b))
+        sign = (1 if af >= 0 else -1) * (1 if bf > 0 else -1)
+        if af == 0.0:
+            return 0.0
+        magnitude = ops.div(abs(af), abs(bf))
+        return sign * _to_float(magnitude)
+
+    @staticmethod
+    def pow(base: Any, exponent: Any) -> float:
+        bf, ef = _to_float(base), _to_float(exponent)
+        if bf >= 0:
+            return _to_float(ops.pow(base, exponent))
+        # negative base, integer exponent → sign(-1)^n * |base|^n
+        if ef == int(ef):
+            sign = -1.0 if int(ef) % 2 else 1.0
+            return sign * _to_float(ops.pow(abs(bf), exponent))
+        # fractional power of negative — would be complex; pass through (NaN)
+        return _to_float(ops.pow(base, exponent))
 
 
 def eml_eval(
