@@ -1,33 +1,39 @@
 """
 eml_math.tree — EML operator-tree renderer.
 
-Parses an ``eml_description`` string into a labeled :class:`EMLTreeNode` tree
-by walking Python's own ``ast`` module (so ops.* call names are preserved as
-node labels).  Renders as:
+Parses an ``eml_description`` string into a labeled :class:`EMLTreeNode` tree.
+By default (``expand_eml=True``) compound ops are *fully expanded* into their
+underlying EML primitives so the rendered tree consists only of:
 
-* **ASCII** — ``node.ascii()``   indented box-and-line tree, e.g.::
+* **exp** / **ln** — EML primitives  (amber boxes)
+* **add** / **sub** / **neg** / **scale** — structural helpers  (grey boxes)
+* leaf scalars, vecs, pi  (green / purple circles)
 
-      mul  [exp(ln·ln)]
-      ├── V_cb
-      └── pow  [exp(n·ln)]
-          ├── lambda_wolfenstein
-          └── 2.0
-
-* **SVG** — ``node.svg()``  self-contained SVG string (no external deps).
-  Compound ops get a teal box, EML primitives get an amber box,
-  leaf scalars/vecs get coloured circles.
-
-* **dict/JSON** — ``node.to_dict()``  JSON-serializable tree for web / D3.
-
-Quick start::
+Example::
 
     from eml_math.tree import parse_eml_tree
 
-    desc = "EML: ops.mul(eml_vec('V_cb'), ops.pow(eml_vec('lambda'), eml_scalar(2.0))) — V_cb·λ²"
-    tree = parse_eml_tree(desc)
-    print(tree.ascii())      # ASCII tree
-    svg  = tree.svg()        # SVG string ready to embed in HTML
-    data = tree.to_dict()    # JSON dict for web renderer
+    desc = "EML: ops.mul(eml_vec('A'), ops.pow(eml_vec('lam'), eml_scalar(2.0)))"
+    print(parse_eml_tree(desc).ascii())
+
+    └── exp
+        └── add
+            ├── ln
+            │   └── A
+            └── ln
+                └── exp
+                    └── ×2.0
+                        └── ln
+                            └── lam
+
+Pass ``expand_eml=False`` to keep the compact ops-level tree (``mul``, ``pow``
+shown as single boxes with EML-form annotations).
+
+Render targets
+--------------
+``node.ascii()``  — indented Unicode art tree
+``node.svg()``    — self-contained inline SVG
+``node.to_dict()`` — JSON dict for web renderers / D3
 """
 from __future__ import annotations
 
@@ -44,25 +50,22 @@ __all__ = [
 ]
 
 
-# ── EML primitive expansions ──────────────────────────────────────────────────
+# ── EML expansion annotations (compact ops-level view) ───────────────────────
 
 EML_EXPANSIONS: Dict[str, str] = {
-    # EML primitives — atomic
     "eml":    "exp(x) − ln(y)",
     "exp":    "eml(x, 1)",
-    "ln":     "eml(1, eml(eml(1,x), 1))",
-    # Arithmetic — compound
+    "ln":     "eml(1,eml(eml(1,x),1))",
     "add":    "sub(a, neg(b))",
-    "sub":    "a.t − b.t",
+    "sub":    "a − b",
     "neg":    "0 − x",
     "inv":    "exp(−ln(x))",
-    "mul":    "exp(ln(a) + ln(b))",
-    "div":    "exp(ln(a) − ln(b))",
+    "mul":    "exp(ln(a)+ln(b))",
+    "div":    "exp(ln(a)−ln(b))",
     "sqrt":   "exp(½·ln(x))",
     "sqr":    "exp(2·ln(x))",
     "pow":    "exp(n·ln(x))",
     "pow_fn": "exp(n·ln(x))",
-    # Trig — compound (immediate eval pending Table-1 depth-15 chain)
     "sin":    "depth-15 EML",
     "cos":    "depth-15 EML",
     "tan":    "sin/cos",
@@ -72,78 +75,60 @@ EML_EXPANSIONS: Dict[str, str] = {
     "sinh":   "½(eˣ−e⁻ˣ)",
     "cosh":   "½(eˣ+e⁻ˣ)",
     "tanh":   "sinh/cosh",
-    # Other
     "abs":    "|x|",
     "log_fn": "ln(x)/ln(b)",
-    "sqr":    "exp(2·ln(x))",
 }
 
 _PRIMITIVES: frozenset = frozenset({"eml", "exp", "ln"})
 
 
 class NodeKind:
-    COMPOUND  = "compound"   # ops.mul, ops.sin, ops.pow …  (higher-level box)
-    PRIMITIVE = "primitive"  # ops.exp, ops.ln  (raw EML)
-    SCALAR    = "scalar"     # eml_scalar(x)
-    VEC       = "vec"        # eml_vec('name')
-    PI        = "pi"         # eml_pi()
-    CONST     = "const"      # bare numeric literal
-    UNKNOWN   = "unknown"
+    PRIMITIVE  = "primitive"   # exp, ln  (EML atomic)
+    STRUCTURAL = "structural"  # add, sub, neg, scale  (EML scaffolding)
+    COMPOUND   = "compound"    # sin, cos … (no EML expansion defined yet)
+    SCALAR     = "scalar"      # eml_scalar(x)
+    VEC        = "vec"         # eml_vec('name')
+    PI         = "pi"          # eml_pi()
+    CONST      = "const"       # bare numeric literal
+    UNKNOWN    = "unknown"
 
 
 # ── Tree node ─────────────────────────────────────────────────────────────────
 
 @dataclass
 class EMLTreeNode:
-    """
-    One node in the parsed EML operator tree.
-
-    Attributes
-    ----------
-    label :
-        Display name: ``"mul"``, ``"2.718"``, ``"lambda_wolfenstein"`` …
-    kind :
-        One of the :class:`NodeKind` constants.
-    children :
-        Ordered child nodes (operands).
-    eml_form :
-        Brief annotation showing how this operator expands into EML primitives,
-        e.g. ``"exp(ln·ln)"`` for *mul*.
-    """
+    """One node in the EML operator tree."""
     label:    str
-    kind:     str                    = NodeKind.UNKNOWN
-    children: List["EMLTreeNode"]    = field(default_factory=list)
-    eml_form: str                    = ""
+    kind:     str                 = NodeKind.UNKNOWN
+    children: List["EMLTreeNode"] = field(default_factory=list)
+    eml_form: str                 = ""   # annotation (compact mode only)
 
-    # layout scratch-space (set by _layout / _assign_pos)
+    # layout scratch (set by layout helpers)
     _px: float = field(default=0.0, repr=False, compare=False)
     _py: float = field(default=0.0, repr=False, compare=False)
-    _sw: float = field(default=0.0, repr=False, compare=False)  # subtree width
+    _sw: float = field(default=0.0, repr=False, compare=False)
 
     # ------------------------------------------------------------------
-    # ASCII renderer
+    # ASCII
     # ------------------------------------------------------------------
 
     def ascii(self, *, _pfx: str = "", _last: bool = True) -> str:
-        """Return a multi-line ASCII art representation of the tree."""
         conn  = "└── " if _last else "├── "
         badge = f"  [{self.eml_form}]" if self.eml_form else ""
         lines = [_pfx + conn + self.label + badge]
-
         child_pfx = _pfx + ("    " if _last else "│   ")
-        for i, child in enumerate(self.children):
-            lines.append(child.ascii(_pfx=child_pfx, _last=(i == len(self.children) - 1)))
+        for i, c in enumerate(self.children):
+            lines.append(c.ascii(_pfx=child_pfx, _last=(i == len(self.children) - 1)))
         return "\n".join(lines)
 
     def __str__(self) -> str:
-        return self.ascii(_pfx="", _last=True)
+        return self.ascii()
 
     # ------------------------------------------------------------------
     # JSON / dict
     # ------------------------------------------------------------------
 
     def to_dict(self) -> Dict[str, Any]:
-        """JSON-serializable tree dict for web renderers (D3 etc.)."""
         d: Dict[str, Any] = {"label": self.label, "kind": self.kind}
         if self.eml_form:
             d["eml_form"] = self.eml_form
@@ -152,59 +137,38 @@ class EMLTreeNode:
         return d
 
     # ------------------------------------------------------------------
-    # SVG renderer
+    # SVG
     # ------------------------------------------------------------------
 
-    # Layout constants
-    _NW   = 130   # node box width
-    _NH   = 46    # node box height
-    _HGAP = 18    # horizontal gap between siblings
-    _VGAP = 72    # vertical gap between levels
-    _PAD  = 24    # canvas padding
+    _NW   = 120
+    _NH   = 44
+    _HGAP = 16
+    _VGAP = 68
+    _PAD  = 24
 
-    # Colour palette per kind
     _COLORS = {
-        NodeKind.COMPOUND:  ("#2E86C1", "#EBF5FB"),   # teal border, light fill
-        NodeKind.PRIMITIVE: ("#D35400", "#FEF0E7"),   # amber
-        NodeKind.SCALAR:    ("#1E8449", "#EAFAF1"),   # green
-        NodeKind.VEC:       ("#7D3C98", "#F5EEF8"),   # purple
-        NodeKind.PI:        ("#7D3C98", "#F5EEF8"),   # purple
-        NodeKind.CONST:     ("#1E8449", "#EAFAF1"),   # green
-        NodeKind.UNKNOWN:   ("#7F8C8D", "#F2F3F4"),   # grey
+        NodeKind.PRIMITIVE:  ("#D35400", "#FEF0E7"),   # amber — exp / ln
+        NodeKind.STRUCTURAL: ("#5D6D7E", "#F2F3F4"),   # slate — add/sub/neg/scale
+        NodeKind.COMPOUND:   ("#2E86C1", "#EBF5FB"),   # blue  — sin/cos/…
+        NodeKind.SCALAR:     ("#1E8449", "#EAFAF1"),   # green
+        NodeKind.VEC:        ("#7D3C98", "#F5EEF8"),   # purple
+        NodeKind.PI:         ("#7D3C98", "#F5EEF8"),   # purple
+        NodeKind.CONST:      ("#1E8449", "#EAFAF1"),   # green
+        NodeKind.UNKNOWN:    ("#7F8C8D", "#F2F3F4"),
     }
 
     def svg(self, *, max_width: int = 1000) -> str:
-        """
-        Return a self-contained SVG string.
-
-        Parameters
-        ----------
-        max_width :
-            Maximum canvas width in pixels; tree scales to fit.
-        """
-        _compute_subtree_width(self)
+        _compute_width(self)
         canvas_w = max(max_width, int(self._sw + 2 * self._PAD))
-        _assign_positions(self, x_left=self._PAD, level=0)
-        depth    = _tree_depth(self)
-        canvas_h = self._PAD * 2 + depth * (self._NH + self._VGAP) + self._NH
-
-        parts: List[str] = []
-        parts.append(
+        _assign_pos(self, x_left=self._PAD, level=0)
+        depth    = _depth(self)
+        canvas_h = self._PAD * 2 + (depth + 1) * (self._NH + self._VGAP)
+        parts: List[str] = [
             f'<svg xmlns="http://www.w3.org/2000/svg" '
             f'width="{canvas_w}" height="{canvas_h}" '
-            f'font-family="monospace" font-size="12">'
-        )
-        parts.append(
-            '<style>'
-            '.node-box{rx:8;ry:8;stroke-width:2}'
-            '.node-label{text-anchor:middle;dominant-baseline:central;font-weight:bold}'
-            '.eml-badge{text-anchor:middle;dominant-baseline:central;font-size:10;fill:#666}'
-            '.edge{stroke:#AAB7B8;stroke-width:1.5;fill:none}'
-            '</style>'
-        )
-        # Draw edges first (so boxes paint on top)
+            f'font-family="monospace" viewBox="0 0 {canvas_w} {canvas_h}">',
+        ]
         _emit_edges(self, parts)
-        # Draw boxes
         _emit_nodes(self, parts)
         parts.append("</svg>")
         return "\n".join(parts)
@@ -212,117 +176,110 @@ class EMLTreeNode:
 
 # ── Layout helpers ────────────────────────────────────────────────────────────
 
-def _compute_subtree_width(node: EMLTreeNode) -> float:
+def _compute_width(n: EMLTreeNode) -> float:
     NW, HGAP = EMLTreeNode._NW, EMLTreeNode._HGAP
-    if not node.children:
-        node._sw = float(NW)
-    else:
-        kids_w  = sum(_compute_subtree_width(c) for c in node.children)
-        gaps    = (len(node.children) - 1) * HGAP
-        node._sw = max(float(NW), kids_w + gaps)
-    return node._sw
+    if not n.children:
+        n._sw = float(NW); return n._sw
+    cw   = sum(_compute_width(c) for c in n.children)
+    gaps = (len(n.children) - 1) * HGAP
+    n._sw = max(float(NW), cw + gaps)
+    return n._sw
 
 
-def _assign_positions(node: EMLTreeNode, x_left: float, level: int) -> None:
+def _assign_pos(n: EMLTreeNode, x_left: float, level: int) -> None:
     NW, NH, HGAP, VGAP, PAD = (
         EMLTreeNode._NW, EMLTreeNode._NH,
         EMLTreeNode._HGAP, EMLTreeNode._VGAP, EMLTreeNode._PAD,
     )
-    node._py = PAD + level * (NH + VGAP)
-    node._px = x_left + (node._sw - NW) / 2.0
+    n._py = PAD + level * (NH + VGAP)
+    n._px = x_left + (n._sw - NW) / 2.0
     cursor = x_left
-    for child in node.children:
-        _assign_positions(child, cursor, level + 1)
-        cursor += child._sw + HGAP
+    for c in n.children:
+        _assign_pos(c, cursor, level + 1)
+        cursor += c._sw + HGAP
 
 
-def _tree_depth(node: EMLTreeNode) -> int:
-    if not node.children:
-        return 0
-    return 1 + max(_tree_depth(c) for c in node.children)
+def _depth(n: EMLTreeNode) -> int:
+    if not n.children: return 0
+    return 1 + max(_depth(c) for c in n.children)
 
 
-def _emit_edges(node: EMLTreeNode, out: List[str]) -> None:
+def _emit_edges(n: EMLTreeNode, out: List[str]) -> None:
     NW, NH = EMLTreeNode._NW, EMLTreeNode._NH
-    px = node._px + NW / 2
-    py = node._py + NH
-    for child in node.children:
-        cx = child._px + NW / 2
-        cy = child._py
-        mid_y = (py + cy) / 2
+    px, py = n._px + NW / 2, n._py + NH
+    for c in n.children:
+        cx, cy = c._px + NW / 2, c._py
+        my = (py + cy) / 2
         out.append(
-            f'<path class="edge" d="M{px:.1f},{py:.1f} '
-            f'C{px:.1f},{mid_y:.1f} {cx:.1f},{mid_y:.1f} {cx:.1f},{cy:.1f}"/>'
+            f'<path d="M{px:.1f},{py:.1f} C{px:.1f},{my:.1f} '
+            f'{cx:.1f},{my:.1f} {cx:.1f},{cy:.1f}" '
+            f'stroke="#AAB7B8" stroke-width="1.5" fill="none"/>'
         )
-        _emit_edges(child, out)
+        _emit_edges(c, out)
 
 
-def _emit_nodes(node: EMLTreeNode, out: List[str]) -> None:
+def _emit_nodes(n: EMLTreeNode, out: List[str]) -> None:
     NW, NH = EMLTreeNode._NW, EMLTreeNode._NH
-    stroke, fill = EMLTreeNode._COLORS.get(
-        node.kind, EMLTreeNode._COLORS[NodeKind.UNKNOWN]
-    )
-    x, y = node._px, node._py
-
+    stroke, fill = EMLTreeNode._COLORS.get(n.kind, EMLTreeNode._COLORS[NodeKind.UNKNOWN])
+    x, y = n._px, n._py
     out.append(
-        f'<rect class="node-box" x="{x:.1f}" y="{y:.1f}" '
-        f'width="{NW}" height="{NH}" '
-        f'stroke="{stroke}" fill="{fill}"/>'
+        f'<rect x="{x:.1f}" y="{y:.1f}" width="{NW}" height="{NH}" '
+        f'rx="8" ry="8" stroke="{stroke}" stroke-width="2" fill="{fill}"/>'
     )
-    # Label — truncate long names
-    label = node.label if len(node.label) <= 18 else node.label[:16] + "…"
-    cx, cy = x + NW / 2, y + NH / 2
-
-    if node.eml_form:
-        # Split vertically: label top, eml_form bottom
+    label = n.label if len(n.label) <= 16 else n.label[:14] + "…"
+    cx = x + NW / 2
+    if n.eml_form:
+        badge = n.eml_form if len(n.eml_form) <= 20 else n.eml_form[:18] + "…"
         out.append(
-            f'<text class="node-label" x="{cx:.1f}" y="{y + NH*0.38:.1f}" '
+            f'<text x="{cx:.1f}" y="{y+NH*0.36:.1f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-weight="bold" font-size="12" '
             f'fill="{stroke}">{_esc(label)}</text>'
         )
-        badge = node.eml_form if len(node.eml_form) <= 22 else node.eml_form[:20] + "…"
         out.append(
-            f'<text class="eml-badge" x="{cx:.1f}" y="{y + NH*0.72:.1f}">'
+            f'<text x="{cx:.1f}" y="{y+NH*0.72:.1f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-size="10" fill="#666">'
             f'{_esc(badge)}</text>'
         )
     else:
         out.append(
-            f'<text class="node-label" x="{cx:.1f}" y="{cy:.1f}" '
+            f'<text x="{cx:.1f}" y="{y+NH/2:.1f}" text-anchor="middle" '
+            f'dominant-baseline="central" font-weight="bold" font-size="12" '
             f'fill="{stroke}">{_esc(label)}</text>'
         )
-
-    for child in node.children:
-        _emit_nodes(child, out)
+    for c in n.children:
+        _emit_nodes(c, out)
 
 
 def _esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-# ── AST → EMLTreeNode parser ─────────────────────────────────────────────────
+# ── AST → EMLTreeNode (with optional EML expansion) ─────────────────────────
 
-def parse_eml_tree(eml_description: str) -> EMLTreeNode:
+def parse_eml_tree(eml_description: str, *, expand_eml: bool = True) -> EMLTreeNode:
     """
     Parse an ``eml_description`` string into an :class:`EMLTreeNode` tree.
 
     Parameters
     ----------
     eml_description :
-        A string starting with ``"EML: "`` in the standard format.
-        The expression is parsed via :mod:`ast` so ``ops.*`` call names
-        are preserved as tree-node labels.
-
-    Returns
-    -------
-    EMLTreeNode
-        Root of the operator tree.
+        String starting with ``"EML: "``.
+    expand_eml :
+        If *True* (default) compound ops are expanded to their EML primitive
+        form — ``mul(a,b)`` becomes ``exp → add → [ln(a), ln(b)]``.
+        If *False* compact ops-level tree is returned (``mul``, ``pow`` etc.
+        shown as single nodes with EML-form annotations).
 
     Example
     -------
-    >>> t = parse_eml_tree("EML: ops.mul(eml_scalar(3.0), eml_vec('b3')) — 3·b₃")
+    >>> t = parse_eml_tree("EML: ops.mul(eml_vec('A'), eml_vec('B'))")
     >>> print(t.ascii())
-    └── mul  [exp(ln·ln)]
-        ├── 3.0
-        └── b3
+    └── exp
+        └── add
+            ├── ln
+            │   └── A
+            └── ln
+                └── B
     """
     from eml_math.evaluator import EMLEvaluator
     expr = EMLEvaluator._parse(eml_description)
@@ -330,106 +287,190 @@ def parse_eml_tree(eml_description: str) -> EMLTreeNode:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as exc:
         return EMLTreeNode(label=f"<parse error: {exc}>", kind=NodeKind.UNKNOWN)
-    return _ast_to_node(tree.body)
+    return _ast_to_node(tree.body, expand_eml=expand_eml)
 
 
-def _ast_to_node(node: ast.expr) -> EMLTreeNode:  # noqa: C901
-    """Recursively convert a Python AST expression node to an EMLTreeNode."""
+# ── Primitive node builders ───────────────────────────────────────────────────
 
+def _prim(label: str, *children: EMLTreeNode) -> EMLTreeNode:
+    return EMLTreeNode(label=label, kind=NodeKind.PRIMITIVE, children=list(children))
+
+def _struct(label: str, *children: EMLTreeNode) -> EMLTreeNode:
+    return EMLTreeNode(label=label, kind=NodeKind.STRUCTURAL, children=list(children))
+
+def _exp(child: EMLTreeNode) -> EMLTreeNode:
+    return _prim("exp", child)
+
+def _ln(child: EMLTreeNode) -> EMLTreeNode:
+    return _prim("ln", child)
+
+def _add(a: EMLTreeNode, b: EMLTreeNode) -> EMLTreeNode:
+    return _struct("add", a, b)
+
+def _sub(a: EMLTreeNode, b: EMLTreeNode) -> EMLTreeNode:
+    return _struct("sub", a, b)
+
+def _neg(child: EMLTreeNode) -> EMLTreeNode:
+    return _struct("neg", child)
+
+def _scale(n: float, child: EMLTreeNode) -> EMLTreeNode:
+    return _struct(f"×{_fmt_num(n)}", child)
+
+
+# ── Compound-op expansion ─────────────────────────────────────────────────────
+
+def _expand(op: str, args: List[ast.expr], expand_eml: bool) -> EMLTreeNode:
+    """Expand a compound ops.* call to its EML primitive tree."""
+    def p(a: ast.expr) -> EMLTreeNode:
+        return _ast_to_node(a, expand_eml=expand_eml)
+
+    # ── arithmetic ──────────────────────────────────────────────────────
+    if op in ("mul", "mul_n") and len(args) == 2:
+        return _exp(_add(_ln(p(args[0])), _ln(p(args[1]))))
+
+    if op in ("div", "div_n") and len(args) == 2:
+        return _exp(_sub(_ln(p(args[0])), _ln(p(args[1]))))
+
+    if op in ("sqrt", "sqrt_n") and len(args) == 1:
+        return _exp(_scale(0.5, _ln(p(args[0]))))
+
+    if op == "sqr" and len(args) == 1:
+        return _exp(_scale(2.0, _ln(p(args[0]))))
+
+    if op in ("pow", "pow_fn") and len(args) == 2:
+        x = p(args[0])
+        n_val = _extract_scalar(args[1])
+        if n_val is not None:
+            return _exp(_scale(n_val, _ln(x)))
+        # symbolic exponent: exp(add(ln(n), ln(x)))
+        return _exp(_add(_ln(p(args[1])), _ln(x)))
+
+    if op in ("inv",) and len(args) == 1:
+        return _exp(_neg(_ln(p(args[0]))))
+
+    if op in ("neg", "neg_n") and len(args) == 1:
+        return _neg(p(args[0]))
+
+    if op in ("add", "add_n") and len(args) == 2:
+        return _add(p(args[0]), p(args[1]))
+
+    if op in ("sub", "sub_n") and len(args) == 2:
+        return _sub(p(args[0]), p(args[1]))
+
+    # ── EML primitives (already at the base level) ───────────────────────
+    if op == "exp" and len(args) == 1:
+        return _exp(p(args[0]))
+
+    if op == "ln" and len(args) == 1:
+        return _ln(p(args[0]))
+
+    if op == "eml" and len(args) == 2:
+        node = EMLTreeNode(label="eml", kind=NodeKind.PRIMITIVE,
+                           children=[p(args[0]), p(args[1])],
+                           eml_form="exp(x)−ln(y)")
+        return node
+
+    # ── trig — no closed-form EML expansion yet ──────────────────────────
+    children = [p(a) for a in args]
+    eml_form = EML_EXPANSIONS.get(op, "")
+    return EMLTreeNode(label=op, kind=NodeKind.COMPOUND,
+                       children=children, eml_form=eml_form)
+
+
+# ── Main AST walker ───────────────────────────────────────────────────────────
+
+def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # noqa: C901
     # ── function call ──────────────────────────────────────────────────
     if isinstance(node, ast.Call):
-        func_name = _func_name(node.func)
-        children  = [_ast_to_node(a) for a in node.args]
+        op = _func_name(node.func)
 
-        # --- eml_scalar(x) ---
-        if func_name == "eml_scalar":
-            val = _literal_value(node.args[0]) if node.args else "?"
-            return EMLTreeNode(label=_fmt_num(val), kind=NodeKind.SCALAR)
+        if op == "eml_scalar":
+            v = _literal_value(node.args[0]) if node.args else "?"
+            return EMLTreeNode(label=_fmt_num(v), kind=NodeKind.SCALAR)
 
-        # --- eml_pi() ---
-        if func_name == "eml_pi":
+        if op == "eml_pi":
             return EMLTreeNode(label="π", kind=NodeKind.PI)
 
-        # --- eml_vec('name') ---
-        if func_name == "eml_vec":
+        if op == "eml_vec":
             name = _literal_value(node.args[0]) if node.args else "?"
             return EMLTreeNode(label=str(name), kind=NodeKind.VEC)
 
-        # --- ops.exp / ops.ln / ops.eml (primitives) ---
-        if func_name in _PRIMITIVES:
-            eml_form = EML_EXPANSIONS.get(func_name, "")
-            return EMLTreeNode(label=func_name, kind=NodeKind.PRIMITIVE,
-                               children=children, eml_form=eml_form)
+        if expand_eml:
+            return _expand(op, node.args, expand_eml=True)
 
-        # --- ops.* compound operators ---
-        eml_form = EML_EXPANSIONS.get(func_name, "")
-        return EMLTreeNode(label=func_name, kind=NodeKind.COMPOUND,
+        # compact mode — keep the ops label
+        children = [_ast_to_node(a, expand_eml=False) for a in node.args]
+        if op in _PRIMITIVES:
+            return EMLTreeNode(label=op, kind=NodeKind.PRIMITIVE,
+                               children=children,
+                               eml_form=EML_EXPANSIONS.get(op, ""))
+        eml_form = EML_EXPANSIONS.get(op, "")
+        return EMLTreeNode(label=op, kind=NodeKind.COMPOUND,
                            children=children, eml_form=eml_form)
 
-    # ── attribute access: ops.mul → "mul" ─────────────────────────────
+    # ── attribute: ops.mul → "mul" (function without call, shouldn't happen) ─
     if isinstance(node, ast.Attribute):
         return EMLTreeNode(label=node.attr, kind=NodeKind.UNKNOWN)
 
     # ── bare name ─────────────────────────────────────────────────────
     if isinstance(node, ast.Name):
-        n = node.id
-        if n == "math":
-            return EMLTreeNode(label="math", kind=NodeKind.UNKNOWN)
-        return EMLTreeNode(label=n, kind=NodeKind.VEC)
+        return EMLTreeNode(label=node.id, kind=NodeKind.VEC)
 
-    # ── numeric / string constant ──────────────────────────────────────
+    # ── constant ──────────────────────────────────────────────────────
     if isinstance(node, ast.Constant):
         v = node.value
         if isinstance(v, (int, float)):
             return EMLTreeNode(label=_fmt_num(v), kind=NodeKind.CONST)
         return EMLTreeNode(label=repr(v), kind=NodeKind.CONST)
 
-    # ── unary negation (e.g. -1.0) ────────────────────────────────────
+    # ── unary negation -x ─────────────────────────────────────────────
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-        inner = _ast_to_node(node.operand)
+        inner = _ast_to_node(node.operand, expand_eml=expand_eml)
         return EMLTreeNode(label=f"-{inner.label}", kind=inner.kind)
 
     # ── tuple / list (rare) ───────────────────────────────────────────
     if isinstance(node, (ast.Tuple, ast.List)):
-        children = [_ast_to_node(e) for e in node.elts]
+        children = [_ast_to_node(e, expand_eml=expand_eml) for e in node.elts]
         return EMLTreeNode(label="(…)", kind=NodeKind.UNKNOWN, children=children)
 
-    # ── fallback ──────────────────────────────────────────────────────
     return EMLTreeNode(label=ast.dump(node)[:30], kind=NodeKind.UNKNOWN)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _extract_scalar(node: ast.expr) -> Optional[float]:
+    """Return float if node is a numeric literal or eml_scalar(x), else None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = _extract_scalar(node.operand)
+        return -v if v is not None else None
+    if isinstance(node, ast.Call):
+        name = _func_name(node.func)
+        if name == "eml_scalar" and node.args:
+            v = _extract_scalar(node.args[0])
+            return v
+    return None
+
+
 def _func_name(node: ast.expr) -> str:
-    """Extract the bare function name from a Call's func node."""
-    if isinstance(node, ast.Attribute):
-        return node.attr          # ops.mul → "mul"
-    if isinstance(node, ast.Name):
-        return node.id            # eml_scalar → "eml_scalar"
+    if isinstance(node, ast.Attribute): return node.attr
+    if isinstance(node, ast.Name):      return node.id
     return ast.dump(node)[:20]
 
 
 def _literal_value(node: ast.expr) -> Any:
-    """Extract the Python literal value from a Constant or simple Name node."""
-    if isinstance(node, ast.Constant):
-        return node.value
-    try:
-        return ast.literal_eval(node)
-    except Exception:
-        return ast.dump(node)[:20]
+    if isinstance(node, ast.Constant): return node.value
+    try:    return ast.literal_eval(node)
+    except: return ast.dump(node)[:20]  # noqa: E722
 
 
 def _fmt_num(v: Any) -> str:
-    """Format a numeric value compactly for display."""
-    if not isinstance(v, (int, float)):
-        return str(v)
-    if v == math.pi:
-        return "π"
-    if v == math.e:
-        return "e"
+    if not isinstance(v, (int, float)): return str(v)
+    if v == math.pi:  return "π"
+    if v == math.e:   return "e"
     if isinstance(v, int) or (isinstance(v, float) and v == int(v) and abs(v) < 1e6):
         return str(int(v))
-    # scientific if very large/small
     if abs(v) >= 1e6 or (abs(v) < 1e-3 and v != 0):
         return f"{v:.3e}"
     return f"{v:.6g}"

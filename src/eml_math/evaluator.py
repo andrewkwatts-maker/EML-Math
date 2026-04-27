@@ -139,33 +139,40 @@ class EMLEvaluator:
                 s = s.split(sep, 1)[0]
         return s.strip()
 
-    def _eml_vec(self, name: str) -> EMLPoint:
-        """Context-bound eml_vec resolver."""
+    def _eml_vec(self, name: str) -> float:
+        """Context-bound eml_vec resolver. Returns a plain float.
+
+        Returning float (not _LitNode) ensures ops.pow() uses the fast
+        _ScaleNode path rather than the exp(mul(n, ln(base))) path, which
+        breaks for base < 1 when n is a TensionPoint.
+        """
         if name in self.context:
             val = self.context[name]
             try:
-                return _LitNode(float(val))
+                return float(val)
             except (TypeError, ValueError):
                 if self.strict:
                     raise KeyError(
                         f"eml_vec('{name}'): value {val!r} is not numeric"
                     )
                 self.missing_refs.append(name)
-                return _LitNode(0.0)
+                return 0.0
         if self.strict:
             raise KeyError(
                 f"eml_vec('{name}'): not found in context (context has "
                 f"{len(self.context)} entries)"
             )
         self.missing_refs.append(name)
-        return _LitNode(0.0)
+        return 0.0
 
     def _namespace(self) -> dict:
         return {
             "ops": ops,
             "math": math,
-            "eml_scalar": lambda x: _LitNode(float(x)),
-            "eml_pi": lambda: _LitNode(math.pi),
+            # Return plain floats so ops.pow(x, eml_scalar(n)) uses the
+            # _ScaleNode path (correct for fractional/negative exponents).
+            "eml_scalar": float,
+            "eml_pi": lambda: math.pi,
             "eml_vec": self._eml_vec,
         }
 

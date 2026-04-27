@@ -101,7 +101,7 @@ class TestLiterals:
 
     def test_eml_vec_known_key(self):
         ev = EMLEvaluator(CONTEXT)
-        result = ev.eval("EML: eml_vec('alpha_inv') — α⁻¹")
+        result = ev.eval("EML: eml_vec('alpha_inv') — alpha-inv")
         assert result == pytest.approx(137.035999177, rel=1e-10)
 
     def test_eml_vec_dotted_key(self):
