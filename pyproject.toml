@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "eml-math"
-version = "1.0.0"
+version = "1.1.0"
 description = "Exp-Minus-Log Mathematics: the EML Sheffer operator eml(x,y)=exp(x)−ln(y) as a universal real-valued foundation for all elementary mathematics"
 readme = "README.md"
 license = { file = "LICENSE" }

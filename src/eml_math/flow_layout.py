@@ -1,0 +1,592 @@
+"""
+eml_math.flow_layout — JSON-intermediate pipeline for the flow renderer.
+
+The default flow_svg / flow_png / flow_pdf API is a one-shot: parse → layout
+→ render. For more artistic control, this module exposes the *intermediate*
+layout graph as a serialisable dict so callers can apply post-processing
+transforms (move nodes, smooth curves, spread sub-trees …) before rendering.
+
+Pipeline
+--------
+
+    1. parse:        EML expression  →  EMLTreeNode
+    2. layout:       EMLTreeNode     →  layout dict   (this module's `to_layout`)
+    3. post-process: layout dict     →  layout dict   (apply zero or more)
+    4. render:       layout dict     →  SVG / PNG / PDF   (`render_svg` etc.)
+
+Layout dict schema (v1)::
+
+    {
+      "schema": "eml-flow-layout/v1",
+      "width":  720,
+      "height": 440,
+      "direction": "down",
+      "output_label": "E"   |  ["x_+", "x_-"],
+      "nodes": [
+        { "id": "n0", "label": "m", "kind": "vec",
+          "x": 60.0, "y": 220.0, "color": [242, 165, 152],
+          "is_leaf": true,  "is_inline": false  },
+        ...
+      ],
+      "edges": [
+        { "from": "n0", "to": "n5", "color": [...],
+          "vertical_bias": 0.5  },
+        ...
+      ]
+    }
+
+Built-in post-processes
+-----------------------
+    gentle_curves(layout, bend=0.3)
+        Reduce edge `vertical_bias` so all branches read as long, gentle
+        sweeps rather than sharp S-curves. Lower `bend` = straighter.
+
+    tighten_base(layout, by=0.4)
+        Pull root-side junction x-coords toward the parent's x by `by`,
+        reducing wiggle in the deeper layers of the tree.
+
+    spread_horizontal(layout, factor=1.3)
+        Multiply every node's cross-axis position by `factor` so the tree
+        spreads outward — more breathing room between input chains.
+
+Use a sequence of post-processes by composing them yourself.
+"""
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from eml_math.tree import EMLTreeNode
+
+__all__ = [
+    "to_layout",
+    "render_svg",
+    "render_png",
+    "render_pdf",
+    # Built-in post-processes
+    "gentle_curves",
+    "tighten_base",
+    "spread_horizontal",
+]
+
+
+# ── to_layout: EMLTreeNode → JSON-friendly dict ─────────────────────────────
+
+def to_layout(
+    node: "EMLTreeNode",
+    *,
+    width: int = 720,
+    height: int = 440,
+    direction: str = "down",
+    palette: Optional[Sequence[Tuple[int, int, int]]] = None,
+    output_label: Any = "Out",
+    expand_symbols: bool = False,
+    merge_inputs: bool = False,
+    inline_constants: bool = False,
+    fixed_colors: Optional[dict] = None,
+    bypass_identity_blend: bool = True,
+    random_palette: bool = False,
+    label_font_size: int = 18,
+    output_font_size: int = 22,
+) -> Dict[str, Any]:
+    """Run layout on *node* and return the position/colour graph as a JSON-
+    serialisable dict.  Apply post-processes to it (see this module's
+    `gentle_curves` etc.), then pass the dict to :func:`render_svg` /
+    :func:`render_png` / :func:`render_pdf`.
+    """
+    from eml_math.flow import (
+        DEFAULT_PALETTE, FIXED_COLORS, _layout, _binarize,
+    )
+
+    if palette is None:
+        palette = DEFAULT_PALETTE
+    fc = FIXED_COLORS if fixed_colors is None else fixed_colors
+
+    multi_output = not isinstance(output_label, str)
+    primary_label_size  = float(label_font_size) * 2.2
+    primary_output_size = float(output_font_size) * 2.0
+    if multi_output:
+        primary_output_size *= 1.6
+    if merge_inputs:
+        primary_label_size = max(primary_label_size, height * 0.5)
+
+    from eml_math.flow import _expand_symbols_in_tree, _collect_leaves
+    preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
+    leaves_preview = _collect_leaves(preview_root)
+    max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
+    cross_margin   = max(40.0, 0.5 * 0.6 * label_font_size * max_label_len + 12.0)
+
+    laid_root, leaves = _layout(
+        node,
+        width=width, height=height,
+        margin_lead=primary_label_size,
+        margin_trail=primary_output_size,
+        margin_cross=cross_margin,
+        palette=palette, direction=direction,
+        expand_symbols=expand_symbols,
+        fixed_colors=fc,
+        bypass_identity_blend=bypass_identity_blend,
+        random_palette=random_palette,
+    )
+
+    # Reposition 0/1 (and inline-numeric) leaves to short stubs.
+    from eml_math.flow import _stub_inline_leaves
+    _stub_inline_leaves(laid_root, direction=direction, fixed_labels=fc.keys(),
+                         inline_constants=inline_constants,
+                         label_font_size=label_font_size)
+
+    # ── Walk the tree and assign stable ids ─────────────────────────────
+    nodes: List[dict] = []
+    edges: List[dict] = []
+    counter = [0]
+    def _id():
+        counter[0] += 1
+        return f"n{counter[0] - 1}"
+
+    leaf_id_set = set()
+    def _walk(n, parent_id=None):
+        nid = _id()
+        is_leaf = not n.children
+        nodes.append({
+            "id":        nid,
+            "label":     n.label,
+            "kind":      n.kind,
+            "x":         float(n._fx),
+            "y":         float(n._fy),
+            "color":     [int(round(v)) for v in n._fcolor],
+            "is_leaf":   is_leaf,
+            "is_inline": is_leaf and n.label in fc,
+        })
+        if is_leaf:
+            leaf_id_set.add(nid)
+        if parent_id is not None:
+            edges.append({
+                "from":          nid,         # child id
+                "to":            parent_id,   # parent id
+                "color":         [int(round(v)) for v in n._fcolor],
+                "vertical_bias": 0.5,
+            })
+        for c in n.children:
+            _walk(c, nid)
+
+    _walk(laid_root)
+
+    return {
+        "schema":        "eml-flow-layout/v1",
+        "width":         width,
+        "height":        height,
+        "direction":     direction,
+        "output_label":  list(output_label) if multi_output else output_label,
+        "nodes":         nodes,
+        "edges":         edges,
+        "render_hints": {
+            "label_font_size":     label_font_size,
+            "output_font_size":    output_font_size,
+            "primary_label_size":  primary_label_size,
+            "primary_output_size": primary_output_size,
+            "cross_margin":        cross_margin,
+            "merge_inputs":        merge_inputs,
+            "inline_constants":    inline_constants,
+            "omit_identity_labels": True,
+        },
+    }
+
+
+# ── Built-in post-processes ─────────────────────────────────────────────────
+
+def gentle_curves(layout: Dict[str, Any], *, bend: float = 0.3) -> Dict[str, Any]:
+    """Reduce every edge's vertical_bias to *bend* (0..1).
+
+    Default 0.3 keeps curves long and gentle. Lower values approach a
+    straight line; higher values produce more pronounced S-curves.
+    Returns a new layout dict (does not mutate the input).
+    """
+    bend = max(0.05, min(0.95, float(bend)))
+    out = _shallow_copy(layout)
+    out["edges"] = [
+        {**e, "vertical_bias": bend}
+        for e in layout["edges"]
+    ]
+    return out
+
+
+def tighten_base(layout: Dict[str, Any], *, by: float = 0.4) -> Dict[str, Any]:
+    """Pull root-side junctions toward their parent on the cross axis.
+
+    `by` ∈ [0, 1]: the fraction by which to drag a child's cross coordinate
+    toward its parent's. 0 = no change; 1 = collapse onto parent.
+
+    Operates iteratively from the root outward; the closer to the root,
+    the more dampening — by default this trims the wiggle that builds up
+    in the deeper layers of long pure-EML chains.
+    """
+    by = max(0.0, min(1.0, float(by)))
+    nodes_by_id = {n["id"]: dict(n) for n in layout["nodes"]}
+    children_of: Dict[str, List[str]] = {n["id"]: [] for n in layout["nodes"]}
+    parent_of: Dict[str, Optional[str]] = {n["id"]: None for n in layout["nodes"]}
+    for e in layout["edges"]:
+        children_of[e["to"]].append(e["from"])
+        parent_of[e["from"]] = e["to"]
+
+    direction = layout.get("direction", "down")
+    cross_axis = "x" if direction in ("down", "up") else "y"
+
+    # Walk top-down (parent first).  A node's contribution to the average is
+    # weighted by depth from the root — closer to the root = more pull.
+    # Find root: node with no parent.
+    roots = [nid for nid, p in parent_of.items() if p is None]
+
+    def _walk(nid, depth):
+        if not children_of[nid]:
+            return
+        for c in children_of[nid]:
+            n  = nodes_by_id[c]
+            pn = nodes_by_id[nid]
+            # Stronger pull near the root (small depth), tapering off.
+            w = by / (1 + depth * 0.6)
+            n[cross_axis] = n[cross_axis] * (1 - w) + pn[cross_axis] * w
+            _walk(c, depth + 1)
+    for r in roots:
+        _walk(r, 0)
+
+    out = _shallow_copy(layout)
+    out["nodes"] = list(nodes_by_id.values())
+    return out
+
+
+def spread_horizontal(layout: Dict[str, Any], *, factor: float = 1.3) -> Dict[str, Any]:
+    """Spread every node along the cross axis by *factor* about the centre.
+
+    factor=1.0 is a no-op; >1 spreads inputs out for more breathing room;
+    <1 compresses. The output canvas isn't resized — the caller may want
+    to bump width/height to match.
+    """
+    direction = layout.get("direction", "down")
+    cross_axis = "x" if direction in ("down", "up") else "y"
+    span = layout["width"] if cross_axis == "x" else layout["height"]
+    centre = span / 2.0
+
+    out = _shallow_copy(layout)
+    out["nodes"] = [
+        {**n, cross_axis: centre + (n[cross_axis] - centre) * factor}
+        for n in layout["nodes"]
+    ]
+    return out
+
+
+def _shallow_copy(d: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(d)
+    out["nodes"] = [dict(n) for n in d["nodes"]]
+    out["edges"] = [dict(e) for e in d["edges"]]
+    if "render_hints" in d:
+        out["render_hints"] = dict(d["render_hints"])
+    return out
+
+
+# ── render: layout dict → SVG / PNG / PDF ───────────────────────────────────
+
+def render_svg(layout: Dict[str, Any], *,
+               background: Optional[str] = None,
+               edge_width: float = 3.0,
+               junction_radius: float = 4.0) -> str:
+    """Render a (possibly post-processed) layout dict as an SVG string."""
+    from eml_math.flow import (
+        _curve_d, _esc, _label_offset, _text_anchor,
+        _output_position, FIXED_LABEL_COLORS,
+    )
+
+    width  = int(layout["width"])
+    height = int(layout["height"])
+    direction = layout.get("direction", "down")
+    out_label = layout.get("output_label", "Out")
+    multi_output = not isinstance(out_label, str)
+    output_labels = list(out_label) if multi_output else [out_label]
+
+    hints = layout.get("render_hints", {})
+    label_font_size  = int(hints.get("label_font_size", 18))
+    output_font_size = int(hints.get("output_font_size", 22))
+    primary_output_size = float(hints.get("primary_output_size",
+                                          output_font_size * 2.0))
+    omit_identity_labels = bool(hints.get("omit_identity_labels", True))
+
+    nodes_by_id = {n["id"]: n for n in layout["nodes"]}
+    children_of: Dict[str, List[str]] = {n["id"]: [] for n in layout["nodes"]}
+    parent_of: Dict[str, Optional[str]] = {n["id"]: None for n in layout["nodes"]}
+    for e in layout["edges"]:
+        children_of[e["to"]].append(e["from"])
+        parent_of[e["from"]] = e["to"]
+    root_id = next(nid for nid, p in parent_of.items() if p is None)
+    root = nodes_by_id[root_id]
+
+    def _hex(rgb): return "#{:02X}{:02X}{:02X}".format(*[max(0, min(255, int(round(v)))) for v in rgb])
+
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" font-family="Inter, Helvetica, Arial, sans-serif">',
+    ]
+    if background:
+        parts.append(f'<rect x="0" y="0" width="{width}" height="{height}" fill="{background}"/>')
+
+    # Edges with their own vertical_bias
+    for e in layout["edges"]:
+        c = nodes_by_id[e["from"]]
+        p = nodes_by_id[e["to"]]
+        parts.append(_curve_d(c["x"], c["y"], p["x"], p["y"], direction,
+                              _hex(e.get("color", c["color"])),
+                              edge_width,
+                              vertical_bias=e.get("vertical_bias", 0.5)))
+
+    # Junctions (every internal node)
+    for n in layout["nodes"]:
+        if n.get("is_leaf"):
+            continue
+        parts.append(
+            f'<circle cx="{n["x"]:.1f}" cy="{n["y"]:.1f}" r="{junction_radius}" '
+            f'fill="{_hex(n["color"])}" stroke="#222" stroke-width="0.8"/>'
+        )
+
+    # Leaf labels
+    for n in layout["nodes"]:
+        if not n.get("is_leaf"):
+            continue
+        # If it's an L=0 / R=1 identity leaf and omit_identity_labels is on, skip.
+        if omit_identity_labels and _is_identity_leaf(n, parent_of, children_of, nodes_by_id):
+            continue
+        text_col = _hex(FIXED_LABEL_COLORS.get(n["label"], n["color"]))
+        if n.get("is_inline"):
+            # Inline: label sits at branch endpoint
+            if direction == "down":
+                tx, ty = n["x"], n["y"] - 4
+                anchor = "middle"
+            elif direction == "up":
+                tx, ty = n["x"], n["y"] + label_font_size
+                anchor = "middle"
+            elif direction == "right":
+                tx, ty = n["x"] + 4, n["y"] + label_font_size * 0.35
+                anchor = "start"
+            else:
+                tx, ty = n["x"] - 4, n["y"] + label_font_size * 0.35
+                anchor = "end"
+        else:
+            tx, ty = _label_offset(n["x"], n["y"], direction, label_font_size, "lead")
+            anchor = _text_anchor(direction, "lead")
+        parts.append(
+            f'<text x="{tx:.1f}" y="{ty:.1f}" fill="{text_col}" text-anchor="{anchor}" '
+            f'font-weight="700" font-size="{label_font_size}">{_esc(n["label"])}</text>'
+        )
+
+    # Output label
+    out_x, out_y = _output_position(direction, width, height, primary_output_size)
+    if multi_output and len(output_labels) > 1:
+        n = len(output_labels)
+        spread = max(60.0, output_font_size * 1.2 * max(len(s) for s in output_labels))
+        for i, lbl in enumerate(output_labels):
+            offset = (i - (n - 1) / 2) * spread
+            if direction in ("down", "up"):
+                ox, oy = out_x + offset, out_y
+            else:
+                ox, oy = out_x, out_y + offset
+            parts.append(_curve_d(root["x"], root["y"], ox, oy, direction,
+                                   _hex(root["color"]), edge_width))
+            parts.append(
+                f'<text x="{ox:.1f}" y="{oy:.1f}" text-anchor="middle" '
+                f'font-weight="700" font-size="{output_font_size}" fill="#222">{_esc(lbl)}</text>'
+            )
+    else:
+        anchor = _text_anchor(direction, "trail")
+        parts.append(
+            f'<text x="{out_x:.1f}" y="{out_y:.1f}" text-anchor="{anchor}" '
+            f'font-weight="700" font-size="{output_font_size}" fill="#222">{_esc(output_labels[0])}</text>'
+        )
+
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def render_png(layout: Dict[str, Any], *, scale: float = 2.0,
+               background: Optional[str] = None) -> bytes:
+    """Render a layout dict as PNG bytes — uses the SVG path then rasterises
+    via Pillow (no SVG parser needed; we draw straight onto a Pillow canvas
+    with the layout's coordinates)."""
+    from io import BytesIO
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        raise RuntimeError("render_png() requires Pillow.")
+    from eml_math.flow import (
+        _bezier_points, _output_position, FIXED_LABEL_COLORS,
+    )
+
+    width  = int(layout["width"])
+    height = int(layout["height"])
+    direction = layout.get("direction", "down")
+    out_label = layout.get("output_label", "Out")
+    multi_output = not isinstance(out_label, str)
+    output_labels = list(out_label) if multi_output else [out_label]
+
+    hints = layout.get("render_hints", {})
+    label_font_size  = int(hints.get("label_font_size", 18))
+    output_font_size = int(hints.get("output_font_size", 22))
+    primary_output_size = float(hints.get("primary_output_size",
+                                          output_font_size * 2.0))
+    omit_identity_labels = bool(hints.get("omit_identity_labels", True))
+    edge_width      = max(1, int(3 * scale))
+    junction_radius = max(1, int(4 * scale))
+
+    W, H = int(width * scale), int(height * scale)
+    if background is None:
+        img = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    else:
+        img = Image.new("RGB", (W, H), background)
+    draw = ImageDraw.Draw(img)
+
+    def _try_font(size: int):
+        for name in ("arial.ttf", "DejaVuSans.ttf", "Helvetica.ttf"):
+            try: return ImageFont.truetype(name, size)
+            except (OSError, IOError): continue
+        return ImageFont.load_default()
+    font_label  = _try_font(int(label_font_size * scale))
+    font_output = _try_font(int(output_font_size * scale))
+
+    nodes_by_id = {n["id"]: n for n in layout["nodes"]}
+    children_of: Dict[str, List[str]] = {n["id"]: [] for n in layout["nodes"]}
+    parent_of: Dict[str, Optional[str]] = {n["id"]: None for n in layout["nodes"]}
+    for e in layout["edges"]:
+        children_of[e["to"]].append(e["from"])
+        parent_of[e["from"]] = e["to"]
+    root_id = next(nid for nid, p in parent_of.items() if p is None)
+    root = nodes_by_id[root_id]
+
+    def _curve_pts(c_x, c_y, p_x, p_y, vb=0.5):
+        vb = max(0.05, min(0.95, vb))
+        p0 = (c_x * scale, c_y * scale); p3 = (p_x * scale, p_y * scale)
+        if direction in ("down", "up"):
+            c_y_ctrl = p0[1] + (p3[1] - p0[1]) * vb
+            p_y_ctrl = p3[1] - (p3[1] - p0[1]) * vb
+            p1 = (p0[0], c_y_ctrl); p2 = (p3[0], p_y_ctrl)
+        else:
+            c_x_ctrl = p0[0] + (p3[0] - p0[0]) * vb
+            p_x_ctrl = p3[0] - (p3[0] - p0[0]) * vb
+            p1 = (c_x_ctrl, p0[1]); p2 = (p_x_ctrl, p3[1])
+        return _bezier_points(p0, p1, p2, p3, samples=40)
+
+    # Edges
+    for e in layout["edges"]:
+        c = nodes_by_id[e["from"]]
+        p = nodes_by_id[e["to"]]
+        col = tuple(int(round(v)) for v in e.get("color", c["color"]))
+        pts = _curve_pts(c["x"], c["y"], p["x"], p["y"], e.get("vertical_bias", 0.5))
+        draw.line(pts, fill=col, width=edge_width, joint="curve")
+
+    # Junctions
+    for n in layout["nodes"]:
+        if n.get("is_leaf"):
+            continue
+        col = tuple(int(round(v)) for v in n["color"])
+        cx, cy = n["x"] * scale, n["y"] * scale
+        draw.ellipse([cx - junction_radius, cy - junction_radius,
+                      cx + junction_radius, cy + junction_radius],
+                     fill=col, outline=(34, 34, 34), width=max(1, edge_width // 3))
+
+    # Leaf labels
+    pad = 12 * scale
+    for n in layout["nodes"]:
+        if not n.get("is_leaf"):
+            continue
+        if omit_identity_labels and _is_identity_leaf(n, parent_of, children_of, nodes_by_id):
+            continue
+        text_rgb = tuple(int(round(v)) for v in
+                         FIXED_LABEL_COLORS.get(n["label"], n["color"]))
+        bbox = draw.textbbox((0, 0), n["label"], font=font_label)
+        tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
+        lx, ly = n["x"] * scale, n["y"] * scale
+        if n.get("is_inline"):
+            if direction == "down":
+                tx = lx - tw / 2; ty = ly - th - 2 * scale
+            elif direction == "up":
+                tx = lx - tw / 2; ty = ly + 2 * scale
+            elif direction == "right":
+                tx = lx + 4 * scale; ty = ly - th / 2
+            else:
+                tx = lx - tw - 4 * scale; ty = ly - th / 2
+        else:
+            if direction == "down":
+                tx = lx - tw / 2; ty = ly - pad - th
+            elif direction == "up":
+                tx = lx - tw / 2; ty = ly + pad
+            elif direction == "right":
+                tx = lx - pad - tw; ty = ly - th / 2
+            else:
+                tx = lx + pad; ty = ly - th / 2
+        draw.text((tx, ty), n["label"], fill=text_rgb, font=font_label)
+
+    # Output label
+    ox, oy = _output_position(direction, width, height, primary_output_size)
+    ox *= scale; oy *= scale
+    if multi_output and len(output_labels) > 1:
+        n = len(output_labels)
+        spread = max(60.0, output_font_size * 1.2 *
+                     max(len(s) for s in output_labels)) * scale
+        for i, lbl in enumerate(output_labels):
+            offset = (i - (n - 1) / 2) * spread
+            if direction in ("down", "up"):
+                lx, ly = ox + offset, oy
+            else:
+                lx, ly = ox, oy + offset
+            pts = _curve_pts(root["x"], root["y"], lx / scale, ly / scale, 0.5)
+            draw.line(pts, fill=tuple(int(round(v)) for v in root["color"]),
+                      width=edge_width, joint="curve")
+            bbox = draw.textbbox((0, 0), lbl, font=font_output)
+            tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
+            draw.text((lx - tw / 2, ly - th / 2), lbl,
+                      fill=(34, 34, 34), font=font_output)
+    else:
+        bbox = draw.textbbox((0, 0), output_labels[0], font=font_output)
+        tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
+        if direction in ("down", "up"):
+            draw.text((ox - tw / 2, oy - th / 2), output_labels[0],
+                      fill=(34, 34, 34), font=font_output)
+        elif direction == "right":
+            draw.text((ox, oy - th / 2), output_labels[0],
+                      fill=(34, 34, 34), font=font_output)
+        else:
+            draw.text((ox - tw, oy - th / 2), output_labels[0],
+                      fill=(34, 34, 34), font=font_output)
+
+    buf = BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def render_pdf(layout: Dict[str, Any], *, scale: float = 2.0,
+               background: str = "white") -> bytes:
+    """Render layout as a single-page raster PDF (background flattened to
+    `background` because PDF doesn't carry alpha for our flat case)."""
+    from io import BytesIO
+    try:
+        from PIL import Image
+    except ImportError:
+        raise RuntimeError("render_pdf() requires Pillow.")
+    png = render_png(layout, scale=scale, background=background)
+    img = Image.open(BytesIO(png)).convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="PDF", resolution=int(72 * scale))
+    return buf.getvalue()
+
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _is_identity_leaf(n, parent_of, children_of, nodes_by_id) -> bool:
+    """True if leaf is L=0 (children[0]=='0') or R=1 (children[1]=='1')."""
+    pid = parent_of.get(n["id"])
+    if pid is None:
+        return False
+    sibs = children_of[pid]
+    if len(sibs) != 2:
+        return False
+    L_id, R_id = sibs[0], sibs[1]
+    if n["id"] == L_id and n["label"] == "0":
+        return True
+    if n["id"] == R_id and n["label"] == "1":
+        return True
+    return False

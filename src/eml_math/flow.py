@@ -478,7 +478,7 @@ def flow_svg(
     output_font_size: int = 22,
     edge_width: float = 3.0,
     junction_radius: float = 4.0,
-    background: Optional[str] = None,
+    background: Optional[str] = None,        # None → fully transparent
 ) -> str:
     """Render *node* as a flow-diagram SVG string.
 
@@ -897,7 +897,7 @@ def flow_png(
     height: int = 600,
     scale: float = 2.0,
     palette: Optional[Sequence[Tuple[int, int, int]]] = None,
-    background: str = "white",
+    background: Optional[str] = None,        # None → fully transparent (RGBA)
     **svg_kw,
 ) -> bytes:
     """Rasterise the flow diagram to a PNG.
@@ -962,10 +962,15 @@ def flow_pdf(
     height: int = 600,
     scale: float = 2.0,
     palette: Optional[Sequence[Tuple[int, int, int]]] = None,
-    background: str = "white",
+    background: str = "white",      # PDF can't show transparent — flatten to white
     **svg_kw,
 ) -> bytes:
-    """Render the flow diagram to a single-page PDF (raster, via Pillow)."""
+    """Render the flow diagram to a single-page PDF (raster, via Pillow).
+
+    PDF doesn't support transparency in our flat one-image case; if you
+    want a PNG-on-PDF with transparency, render flow_png() yourself and
+    embed it in your own document instead.
+    """
     from io import BytesIO
     try:
         from PIL import Image
@@ -988,7 +993,7 @@ def _flow_png_pillow(
     height: int,
     scale: float,
     palette: Optional[Sequence[Tuple[int, int, int]]],
-    background: str,
+    background: Optional[str],
     direction: str = "down",
     show_output_label: bool = True,
     output_label = "Out",
@@ -1067,7 +1072,12 @@ def _flow_png_pillow(
                          inline_constants=inline_constants,
                          label_font_size=label_font_size)
 
-    img = Image.new("RGB", (W, H), background)
+    # Default to fully-transparent RGBA when no background colour given
+    # so the PNG can drop straight onto any page background.
+    if background is None:
+        img = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    else:
+        img = Image.new("RGB", (W, H), background)
     draw = ImageDraw.Draw(img)
 
     # Try to load a decent font; fall back to default bitmap if not found.
