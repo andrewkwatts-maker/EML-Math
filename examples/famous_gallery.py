@@ -32,22 +32,16 @@ def main() -> None:
     #   inline_constants   — numeric constants render at the branch endpoint
     #   expand_symbols     — named symbols (e, φ, √2, …) get expanded into
     #                         their EML constructions in the diagram
-    # Variants kept lean: default (the cleanest one) plus _inline (numeric
-    # constants drawn at branch endpoints rather than at the top input row).
-    # Merged and expand_symbols variants were trialled but the default looks
-    # better; both stay available as flow_*() kwargs but aren't part of the
-    # gallery anymore.
-    base = (720, 440)
-    variants = [
-        ("",        dict(),                          base),
-        ("_inline", dict(inline_constants=True),     base),
-    ]
+    # Single rendering per equation — the default config. All optional
+    # behaviours (merge_inputs, inline_constants, expand_symbols,
+    # random_palette, custom palette/colours) remain available as
+    # kwargs to flow_svg/png/pdf for callers who want them.
+    width, height = 720, 440
     for eq in eqs:
-        for suffix, kw, (w, h) in variants:
-            png = eq.flow_png(width=w, height=h, **kw)
-            pdf = eq.flow_pdf(width=w, height=h, **kw)
-            (out_dir / "png" / f"{eq.name}{suffix}.png").write_bytes(png)
-            (out_dir / "pdf" / f"{eq.name}{suffix}.pdf").write_bytes(pdf)
+        png = eq.flow_png(width=width, height=height)
+        pdf = eq.flow_pdf(width=width, height=height)
+        (out_dir / "png" / f"{eq.name}.png").write_bytes(png)
+        (out_dir / "pdf" / f"{eq.name}.pdf").write_bytes(pdf)
         print(f"  {eq.category:9s} {eq.name}")
 
     # Standalone HTML viewer that re-renders client-side via the bundled JS
