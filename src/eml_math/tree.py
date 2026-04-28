@@ -153,6 +153,25 @@ class EMLTreeNode:
         return _render_latex(self, parent_prec=0)
 
     # ------------------------------------------------------------------
+    # Flow diagram (top-down inputs → output)
+    # ------------------------------------------------------------------
+
+    def flow_svg(self, **kw) -> str:
+        """Render this tree as a flow diagram SVG. See :func:`eml_math.flow.flow_svg`."""
+        from eml_math.flow import flow_svg
+        return flow_svg(self, **kw)
+
+    def flow_html(self, **kw) -> str:
+        """Render this tree as an HTML-embedded flow diagram. See :func:`eml_math.flow.flow_html`."""
+        from eml_math.flow import flow_html
+        return flow_html(self, **kw)
+
+    def flow_png(self, **kw) -> bytes:
+        """Render this tree as a flow diagram PNG. See :func:`eml_math.flow.flow_png`."""
+        from eml_math.flow import flow_png
+        return flow_png(self, **kw)
+
+    # ------------------------------------------------------------------
     # SVG
     # ------------------------------------------------------------------
 

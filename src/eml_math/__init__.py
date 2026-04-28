@@ -128,6 +128,7 @@ from eml_math.e8_248 import E8_248, E8xE8
 from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
 from eml_math.operators import eml_scalar, eml_pi, eml_vec
 from eml_math.tree import EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree
+from eml_math.flow import flow_svg, flow_html, flow_png, DEFAULT_PALETTE
 
 iterate = simulate_pulses
 
@@ -197,4 +198,9 @@ __all__ = [
     "eml_scalar",
     "eml_pi",
     "eml_vec",
+    # Flow-diagram renderer
+    "flow_svg",
+    "flow_html",
+    "flow_png",
+    "DEFAULT_PALETTE",
 ]
