@@ -32,6 +32,7 @@ __all__ = [
     "DEFAULT_PALETTE",
     "flow_svg",
     "flow_png",
+    "flow_pdf",
     "flow_html",
 ]
 
@@ -437,6 +438,51 @@ def _bezier_points(
              + t**3 * p3[1])
         out.append((x, y))
     return out
+
+
+def flow_pdf(
+    node: "EMLTreeNode",
+    *,
+    width: int = 800,
+    height: int = 600,
+    scale: float = 2.0,
+    palette: Optional[Sequence[Tuple[int, int, int]]] = None,
+    background: str = "white",
+    **svg_kw,
+) -> bytes:
+    """Rasterise the flow diagram to a one-page PDF.
+
+    Tries ``cairosvg`` first (true-vector PDF). Falls back to Pillow's
+    PDF writer (raster image embedded in a PDF page) if cairosvg is not
+    installed.
+    """
+    # Vector-PDF path
+    try:
+        import cairosvg  # type: ignore
+        svg = flow_svg(
+            node, width=width, height=height,
+            palette=palette, background=background, **svg_kw,
+        )
+        return cairosvg.svg2pdf(bytestring=svg.encode("utf-8"))
+    except ImportError:
+        pass
+
+    # Raster-PDF fallback via Pillow
+    from io import BytesIO
+    try:
+        from PIL import Image
+    except ImportError:
+        raise RuntimeError(
+            "flow_pdf() requires either 'cairosvg' or 'Pillow' to be installed."
+        )
+    png_bytes = flow_png(
+        node, width=width, height=height, scale=scale,
+        palette=palette, background=background, **svg_kw,
+    )
+    img = Image.open(BytesIO(png_bytes)).convert("RGB")
+    buf = BytesIO()
+    img.save(buf, format="PDF", resolution=int(72 * scale))
+    return buf.getvalue()
 
 
 def _flow_png_pillow(

@@ -233,6 +233,11 @@ class EMLTreeNode:
         from eml_math.flow import flow_png
         return flow_png(self, **kw)
 
+    def flow_pdf(self, **kw) -> bytes:
+        """Render this tree as a single-page PDF. See :func:`eml_math.flow.flow_pdf`."""
+        from eml_math.flow import flow_pdf
+        return flow_pdf(self, **kw)
+
     # ------------------------------------------------------------------
     # SVG
     # ------------------------------------------------------------------

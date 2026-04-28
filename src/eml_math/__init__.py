@@ -131,8 +131,14 @@ from eml_math.tree import (
     EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree,
     to_compact, from_compact, KIND_CHAR, CHAR_KIND,
 )
-from eml_math.flow import flow_svg, flow_html, flow_png, DEFAULT_PALETTE
+from eml_math.flow import flow_svg, flow_html, flow_png, flow_pdf, DEFAULT_PALETTE
 from eml_math.symbols import Symbol, SYMBOLS, lookup, construct, register
+from eml_math.famous import (
+    FamousEquation, FAMOUS,
+    get as get_famous,
+    by_category as famous_by_category,
+    all_equations as all_famous_equations,
+)
 from eml_math.web import get_flow_js, FLOW_JS_PATH
 
 iterate = simulate_pulses
@@ -207,7 +213,14 @@ __all__ = [
     "flow_svg",
     "flow_html",
     "flow_png",
+    "flow_pdf",
     "DEFAULT_PALETTE",
+    # Famous-equations registry
+    "FamousEquation",
+    "FAMOUS",
+    "get_famous",
+    "famous_by_category",
+    "all_famous_equations",
     # Compact tree serialisation (JSON-friendly array form)
     "to_compact",
     "from_compact",
