@@ -26,13 +26,17 @@ def main() -> None:
     eqs = all_equations()
     print(f"Rendering {len(eqs)} famous equations -> {out_dir}/")
 
-    # Per-equation PNG + PDF
+    # Per-equation PNG + PDF, in both standard and merged-inputs variants.
     for eq in eqs:
-        png = eq.flow_png(width=720, height=440)
-        pdf = eq.flow_pdf(width=720, height=440)
+        png      = eq.flow_png(width=720, height=440, merge_inputs=False)
+        png_merg = eq.flow_png(width=720, height=440, merge_inputs=True)
+        pdf      = eq.flow_pdf(width=720, height=440, merge_inputs=False)
+        pdf_merg = eq.flow_pdf(width=720, height=440, merge_inputs=True)
         (out_dir / "png" / f"{eq.name}.png").write_bytes(png)
+        (out_dir / "png" / f"{eq.name}_merged.png").write_bytes(png_merg)
         (out_dir / "pdf" / f"{eq.name}.pdf").write_bytes(pdf)
-        print(f"  {eq.category:9s} {eq.name:24s}  PNG {len(png):>6d} B   PDF {len(pdf):>6d} B")
+        (out_dir / "pdf" / f"{eq.name}_merged.pdf").write_bytes(pdf_merg)
+        print(f"  {eq.category:9s} {eq.name:24s}  PNG {len(png):>6d} / merged {len(png_merg):>6d}")
 
     # Standalone HTML viewer that re-renders client-side via the bundled JS
     js  = get_flow_js()

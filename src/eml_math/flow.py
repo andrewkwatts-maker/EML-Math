@@ -67,7 +67,12 @@ DEFAULT_PALETTE: Sequence[Tuple[int, int, int]] = (
 # Sentinel leaves get a neutral muted colour so they don't compete with
 # real-input colours visually.
 SENTINEL_COLOR: Tuple[int, int, int] = (160, 160, 160)
-SENTINEL_LABELS = frozenset({"⊥", "1"})
+# Only the bottom (exp(⊥)=0) is treated as a sentinel — it's a pure-EML
+# internal artefact with no semantic meaning to a human reader. The number
+# 1 is a real numeric input (it just happens to be ln(1)=0 in EML), so it
+# gets a normal palette colour and participates in merging just like any
+# other constant.
+SENTINEL_LABELS = frozenset({"⊥"})
 
 
 # ── Internal layout state attached to nodes ──────────────────────────────────
@@ -318,6 +323,7 @@ def flow_svg(
     output_label = "Out",                    # str | Sequence[str] for multi-output
     expand_symbols: bool = False,
     merge_inputs: bool = False,              # deduplicate identical inputs into one
+    show_sentinel_labels: bool = False,      # show ⊥ / 1 sentinel labels on leaves
     label_font_size: int = 18,
     output_font_size: int = 22,
     edge_width: float = 3.0,
@@ -434,14 +440,16 @@ def flow_svg(
             col = _rgb_hex(leaf._fcolor)
             parts.append(_curve_d(mx, my, leaf._fx, leaf._fy, direction, col, edge_width))
 
-        # Render one label per unique input
+        # Render one label per unique input (skip sentinels unless asked)
         for lbl in unique_labels:
+            is_sentinel = lbl in SENTINEL_LABELS
+            if is_sentinel and not show_sentinel_labels:
+                continue
             mx, my = merged_pos[lbl]
-            col = _rgb_hex(SENTINEL_COLOR if lbl in SENTINEL_LABELS
+            col = _rgb_hex(SENTINEL_COLOR if is_sentinel
                            else next(iter(c for l, c in _label_colors_iter(leaves) if l == lbl)))
             lx, ly = _label_offset(mx, my, direction, label_font_size, "lead")
             anchor = _text_anchor(direction, "lead")
-            is_sentinel = lbl in SENTINEL_LABELS
             fs     = int(label_font_size * 0.7) if is_sentinel else label_font_size
             weight = "400" if is_sentinel else "700"
             parts.append(
@@ -450,10 +458,12 @@ def flow_svg(
             )
     else:
         for leaf in leaves:
+            is_sentinel = leaf.label in SENTINEL_LABELS
+            if is_sentinel and not show_sentinel_labels:
+                continue   # tiny grey dot is enough — see _emit_junctions
             col = _rgb_hex(leaf._fcolor)
             lx, ly = _label_offset(leaf._fx, leaf._fy, direction, label_font_size, "lead")
             anchor = _text_anchor(direction, "lead")
-            is_sentinel = leaf.label in SENTINEL_LABELS
             fs     = int(label_font_size * 0.7) if is_sentinel else label_font_size
             weight = "400" if is_sentinel else "700"
             parts.append(
@@ -696,31 +706,12 @@ def flow_pdf(
     background: str = "white",
     **svg_kw,
 ) -> bytes:
-    """Rasterise the flow diagram to a one-page PDF.
-
-    Tries ``cairosvg`` first (true-vector PDF). Falls back to Pillow's
-    PDF writer (raster image embedded in a PDF page) if cairosvg is not
-    installed.
-    """
-    # Vector-PDF path
-    try:
-        import cairosvg  # type: ignore
-        svg = flow_svg(
-            node, width=width, height=height,
-            palette=palette, background=background, **svg_kw,
-        )
-        return cairosvg.svg2pdf(bytestring=svg.encode("utf-8"))
-    except ImportError:
-        pass
-
-    # Raster-PDF fallback via Pillow
+    """Render the flow diagram to a single-page PDF (raster, via Pillow)."""
     from io import BytesIO
     try:
         from PIL import Image
     except ImportError:
-        raise RuntimeError(
-            "flow_pdf() requires either 'cairosvg' or 'Pillow' to be installed."
-        )
+        raise RuntimeError("flow_pdf() requires Pillow.")
     png_bytes = flow_png(
         node, width=width, height=height, scale=scale,
         palette=palette, background=background, **svg_kw,
@@ -743,6 +734,8 @@ def _flow_png_pillow(
     show_output_label: bool = True,
     output_label = "Out",
     expand_symbols: bool = False,
+    merge_inputs: bool = False,
+    show_sentinel_labels: bool = False,
     label_font_size: int = 18,
     output_font_size: int = 22,
     edge_width: float = 3.0,
@@ -852,28 +845,69 @@ def _flow_png_pillow(
             _draw_junctions(c)
     _draw_junctions(node)
 
-    # Leaf labels — direction-aware placement
+    # Leaf labels — direction-aware placement.  Skip pure-EML sentinel
+    # labels by default so they don't clutter the diagram.
     pad = 12 * scale
-    for leaf in leaves:
-        col = tuple(int(round(v)) for v in leaf._fcolor)
-        bbox = draw.textbbox((0, 0), leaf.label, font=font_label)
+
+    def _draw_leaf_label(label_text, color_rgb, lx_screen, ly_screen):
+        bbox = draw.textbbox((0, 0), label_text, font=font_label)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
-        lx = leaf._fx * scale
-        ly = leaf._fy * scale
         if direction == "down":
-            tx = lx - tw / 2
-            ty = ly - pad - th
+            tx = lx_screen - tw / 2; ty = ly_screen - pad - th
         elif direction == "up":
-            tx = lx - tw / 2
-            ty = ly + pad
+            tx = lx_screen - tw / 2; ty = ly_screen + pad
         elif direction == "right":
-            tx = lx - pad - tw
-            ty = ly - th / 2
+            tx = lx_screen - pad - tw; ty = ly_screen - th / 2
         else:  # left
-            tx = lx + pad
-            ty = ly - th / 2
-        draw.text((tx, ty), leaf.label, fill=col, font=font_label)
+            tx = lx_screen + pad; ty = ly_screen - th / 2
+        draw.text((tx, ty), label_text, fill=color_rgb, font=font_label)
+
+    if merge_inputs:
+        # One input position per unique leaf label; redirector curves from
+        # the merged position to every usage point in the tree.
+        unique_labels = []
+        for l in leaves:
+            if l.label not in unique_labels:
+                unique_labels.append(l.label)
+        n_uniq = len(unique_labels)
+
+        # Compute merged-input screen positions (in "logical" units, scaled below).
+        merged_pos = {}
+        for i, lbl in enumerate(unique_labels):
+            cross_t = 0.5 if n_uniq == 1 else i / (n_uniq - 1)
+            if direction in ("down", "up"):
+                mx = cross_margin + cross_t * (width - 2 * cross_margin)
+                my = primary_label_size if direction == "down" else height - primary_label_size
+            else:
+                my = cross_margin + cross_t * (height - 2 * cross_margin)
+                mx = primary_label_size if direction == "right" else width - primary_label_size
+            merged_pos[lbl] = (mx, my)
+
+        # Redirector curves
+        for leaf in leaves:
+            mx, my = merged_pos[leaf.label]
+            col = tuple(int(round(v)) for v in leaf._fcolor)
+            pts = _curve_pts_for_pil(mx, my, leaf._fx, leaf._fy)
+            draw.line(pts, fill=col, width=ew, joint="curve")
+
+        # One label per unique input
+        label_color = {}
+        for lbl, c in _label_colors_iter(leaves):
+            label_color[lbl] = tuple(int(round(v)) for v in c)
+        for lbl in unique_labels:
+            is_sentinel = lbl in SENTINEL_LABELS
+            if is_sentinel and not show_sentinel_labels:
+                continue
+            mx, my = merged_pos[lbl]
+            _draw_leaf_label(lbl, label_color[lbl], mx * scale, my * scale)
+    else:
+        for leaf in leaves:
+            is_sentinel = leaf.label in SENTINEL_LABELS
+            if is_sentinel and not show_sentinel_labels:
+                continue
+            col = tuple(int(round(v)) for v in leaf._fcolor)
+            _draw_leaf_label(leaf.label, col, leaf._fx * scale, leaf._fy * scale)
 
     # Output label(s) — direction-aware placement
     if show_output_label:

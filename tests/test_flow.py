@@ -378,7 +378,9 @@ class TestEqualLabelsSameColor:
         # all three different
         assert len(set(cols)) == 3
 
-    def test_sentinels_share_grey(self):
+    def test_bottom_sentinel_grey(self):
+        # ⊥ is the only true sentinel — it gets the neutral grey.
+        # `1` is a real numeric input and gets a normal palette colour.
         from eml_math.flow import SENTINEL_COLOR
         t = parse_eml_tree(
             "EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True
@@ -388,9 +390,17 @@ class TestEqualLabelsSameColor:
                             margin_trail=40, margin_cross=40,
                             palette=DEFAULT_PALETTE, direction="down",
                             expand_symbols=False)
-        sentinels = [l for l in leaves if l.label in ("⊥", "1")]
-        for s in sentinels:
-            assert s._fcolor == SENTINEL_COLOR
+        bottoms = [l for l in leaves if l.label == "⊥"]
+        ones    = [l for l in leaves if l.label == "1"]
+        assert bottoms, "expected at least one ⊥ leaf in pure-eml form"
+        for b in bottoms:
+            assert b._fcolor == SENTINEL_COLOR
+        # All `1` leaves share a single (non-grey) palette colour.
+        if ones:
+            shared = ones[0]._fcolor
+            assert shared != SENTINEL_COLOR
+            for o in ones[1:]:
+                assert o._fcolor == shared
 
 
 # ---------------------------------------------------------------------------

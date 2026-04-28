@@ -68,19 +68,20 @@ class FamousEquation:
     category:    str                  # 'physics' | 'geometry' | 'math'
     notes:       str = ""
 
-    def parse(self, *, mode: str = "pure"):
+    def parse(self, *, mode: str = "compact"):
         """Return the parsed :class:`EMLTreeNode`.
 
         Parameters
         ----------
         mode :
-            ``"pure"`` (default) — every internal node is the binary EML
-            primitive ``eml(L, R) = exp(L) − ln(R)``. This is the
-            mathematically faithful representation used by the flow renderer
-            so unlabelled junctions are not misleading.
-            ``"compact"`` — operator-level tree (``mul``, ``pow``, …);
-            useful for LaTeX rendering.
-            ``"expanded"`` — exp/ln/add/sub/scale primitives but not yet
+            ``"compact"`` (default) — operator-level tree (``mul``, ``pow``, …)
+            with internal nodes binarised at render time. The flow diagram
+            shows only the real inputs and the output, with each junction
+            being a binary merge of two streams. Cleanest visualisation.
+            ``"pure"``     — every internal node is the binary EML primitive
+            ``eml(L, R) = exp(L) − ln(R)`` with ``⊥`` and ``1`` sentinels.
+            Mathematically faithful but visually deeper.
+            ``"expanded"`` — exp/ln/add/sub/scale primitives, not yet
             collapsed to binary eml.
         """
         from eml_math.tree import parse_eml_tree
@@ -97,20 +98,16 @@ class FamousEquation:
         from eml_math.evaluator import EMLEvaluator
         return EMLEvaluator(context, strict=False).eval(self.eml)
 
-    def flow_svg(self, *, mode: str = "pure", **kw) -> str:
-        """Render the flow diagram as SVG; output label defaults to ``self.output``.
-
-        ``mode`` controls how the tree is built before binarisation; default
-        is ``"pure"`` so every visible junction is genuinely ``eml(L, R)``.
-        """
+    def flow_svg(self, *, mode: str = "compact", **kw) -> str:
+        """Render the flow diagram as SVG; output label defaults to ``self.output``."""
         kw.setdefault("output_label", self.output)
         return self.parse(mode=mode).flow_svg(**kw)
 
-    def flow_png(self, *, mode: str = "pure", **kw) -> bytes:
+    def flow_png(self, *, mode: str = "compact", **kw) -> bytes:
         kw.setdefault("output_label", self.output)
         return self.parse(mode=mode).flow_png(**kw)
 
-    def flow_pdf(self, *, mode: str = "pure", **kw) -> bytes:
+    def flow_pdf(self, *, mode: str = "compact", **kw) -> bytes:
         kw.setdefault("output_label", self.output)
         return self.parse(mode=mode).flow_pdf(**kw)
 
