@@ -162,3 +162,93 @@ class TestNonEML:
     def test_quantize(self):
         assert ops.quantize(2.718, 100) == 272
         assert ops.quantize(1.0, 100) == 100
+
+
+# ── New parametrized range and composition tests (+40 total) ──────────────────
+
+class TestArithmeticRange:
+    """add, sub, mul, div over 3 (a,b) pairs — 3 tests each = 12 total."""
+
+    @pytest.mark.parametrize("a,b", [(0.5, 1.0), (2.0, 5.0), (10.0, 0.5)])
+    def test_add_range(self, a, b):
+        assert abs(ops.add(a, b).tension() - (a + b)) < 1e-10
+
+    @pytest.mark.parametrize("a,b", [(0.5, 1.0), (2.0, 5.0), (10.0, 0.5)])
+    def test_sub_range(self, a, b):
+        assert abs(ops.sub(a, b).tension() - (a - b)) < 1e-10
+
+    @pytest.mark.parametrize("a,b", [(0.5, 1.0), (2.0, 5.0), (10.0, 0.5)])
+    def test_mul_range(self, a, b):
+        assert abs(ops.mul(a, b).tension() - (a * b)) < 1e-9
+
+    @pytest.mark.parametrize("a,b", [(0.5, 1.0), (2.0, 5.0), (10.0, 0.5)])
+    def test_div_range(self, a, b):
+        assert abs(ops.div(a, b).tension() - (a / b)) < 1e-9
+
+
+class TestTranscendentalRange:
+    """exp, ln, sqrt, sin, cos, tan over 3 values — 3 tests each = 18 total."""
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 2.0])
+    def test_exp_range(self, x):
+        assert abs(ops.exp(x).tension() - math.exp(x)) < 1e-10
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 2.0])
+    def test_ln_range(self, x):
+        assert abs(ops.ln(x).tension() - math.log(x)) < 1e-10
+
+    @pytest.mark.parametrize("x", [1.0, 4.0, 9.0])
+    def test_sqrt_range(self, x):
+        assert abs(ops.sqrt(x).tension() - math.sqrt(x)) < 1e-6
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 2.0])
+    def test_sin_range(self, x):
+        assert abs(ops.sin(x).tension() - math.sin(x)) < 1e-10
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 2.0])
+    def test_cos_range(self, x):
+        assert abs(ops.cos(x).tension() - math.cos(x)) < 1e-10
+
+    @pytest.mark.parametrize("x", [0.1, 1.0, 2.0])
+    def test_tan_range(self, x):
+        assert abs(ops.tan(x).tension() - math.tan(x)) < 1e-10
+
+
+class TestCompositionChain:
+    """exp(ln(x))==x, ln(exp(x))==x, sin²+cos²==1 — 5 tests."""
+
+    def test_exp_ln_at_0p5(self):
+        assert abs(ops.exp(ops.ln(0.5)).tension() - 0.5) < 1e-9
+
+    def test_exp_ln_at_5(self):
+        assert abs(ops.exp(ops.ln(5.0)).tension() - 5.0) < 1e-9
+
+    def test_ln_exp_at_2(self):
+        assert abs(ops.ln(ops.exp(2.0)).tension() - 2.0) < 1e-9
+
+    def test_pythagorean_at_0p5(self):
+        s, c = ops.sin(0.5).tension(), ops.cos(0.5).tension()
+        assert abs(s * s + c * c - 1.0) < 1e-10
+
+    def test_pythagorean_at_1p5(self):
+        s, c = ops.sin(1.5).tension(), ops.cos(1.5).tension()
+        assert abs(s * s + c * c - 1.0) < 1e-10
+
+
+class TestEdgeCases:
+    """Operators at boundary values — 5 tests."""
+
+    def test_add_half_plus_half(self):
+        assert abs(ops.add(0.5, 0.5).tension() - 1.0) < 1e-10
+
+    def test_mul_by_one(self):
+        assert abs(ops.mul(5.0, 1.0).tension() - 5.0) < 1e-9
+
+    def test_ln_at_one_is_zero(self):
+        assert abs(ops.ln(1.0).tension() - 0.0) < 1e-10
+
+    def test_exp_at_zero_is_one(self):
+        assert abs(ops.exp(0.0).tension() - 1.0) < 1e-12
+
+    def test_sqrt_of_four_is_two(self):
+        assert abs(ops.sqrt(4.0).tension() - 2.0) < 1e-9

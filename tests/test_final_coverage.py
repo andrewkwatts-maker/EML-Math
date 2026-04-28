@@ -68,14 +68,6 @@ class TestEMLAxioms:
         p2 = p.mirror_pulse()
         assert abs(p2.x - p.y) < 1e-12
 
-    def test_is_slipping_false_normally(self):
-        p = EMLPoint(1.0, 1.0)
-        assert not p.is_slipping()
-
-    def test_is_locked_false_normally(self):
-        p = EMLPoint(1.0, 1.0)
-        assert not p.is_locked()
-
     def test_locked_wheel_condition(self):
         """Locked wheel: eml(x, exp(exp(x))) = 0"""
         for x in [0.5, 1.0]:

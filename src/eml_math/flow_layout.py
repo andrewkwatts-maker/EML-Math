@@ -65,7 +65,6 @@ __all__ = [
     "render_pdf",
     # Built-in post-processes
     "gentle_curves",
-    "flowing_sideways",
     "tighten_base",
     "spread_horizontal",
     "fit_to_canvas",
@@ -91,6 +90,8 @@ def to_layout(
     random_palette: bool = False,
     label_font_size: int = 18,
     output_font_size: int = 22,
+    auto_height: bool = True,
+    min_layer_height: float = 38.0,
 ) -> Dict[str, Any]:
     """Run layout on *node* and return the position/colour graph as a JSON-
     serialisable dict.  Apply post-processes to it (see this module's
@@ -113,9 +114,24 @@ def to_layout(
     if merge_inputs:
         primary_label_size = max(primary_label_size, height * 0.5)
 
-    from eml_math.flow import _expand_symbols_in_tree, _collect_leaves
+    from eml_math.flow import _expand_symbols_in_tree, _collect_leaves, _height
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
+
+    # Dynamic-height growth: deep pure-EML trees need more vertical room
+    # so the wiggle has space to read as winding rather than as wide
+    # back-and-forth swings at the base. Each layer of tree depth gets at
+    # least `min_layer_height` pixels on the primary axis.
+    if auto_height:
+        depth = _height(preview_root)
+        primary_axis_needed = (
+            primary_label_size + primary_output_size +
+            max(1, depth) * float(min_layer_height)
+        )
+        if direction in ("down", "up"):
+            height = max(int(height), int(primary_axis_needed))
+        else:
+            width  = max(int(width),  int(primary_axis_needed))
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
     cross_margin   = max(40.0, 0.5 * 0.6 * label_font_size * max_label_len + 12.0)
 
@@ -219,45 +235,6 @@ def gentle_curves(layout: Dict[str, Any], *, bend: float = 0.55) -> Dict[str, An
     return out
 
 
-def flowing_sideways(layout: Dict[str, Any], *,
-                     amplitude: float = 0.35,
-                     bend: float = 0.55) -> Dict[str, Any]:
-    """Add a sideways bow to every edge so the diagram has organic sweep
-    instead of straight vertical chains.
-
-    For each edge, the cubic-Bezier control points are perturbed on the
-    cross axis by `amplitude × edge_length`, alternating sign by edge so
-    consecutive branches lean opposite directions (creates a snake-like
-    flow rather than all bending the same way).
-
-    `bend` sets the primary-axis component (same meaning as
-    `gentle_curves`).
-    """
-    bend = max(0.05, min(0.95, float(bend)))
-    amp  = max(-1.0, min(1.0, float(amplitude)))
-    direction = layout.get("direction", "down")
-    cross_is_x = direction in ("down", "up")
-
-    nodes_by_id = {n["id"]: n for n in layout["nodes"]}
-
-    out = _shallow_copy(layout)
-    new_edges = []
-    for i, e in enumerate(layout["edges"]):
-        c = nodes_by_id[e["from"]]
-        p = nodes_by_id[e["to"]]
-        # Edge length on primary axis.
-        if cross_is_x:
-            primary_len = abs(p["y"] - c["y"])
-        else:
-            primary_len = abs(p["x"] - c["x"])
-        side = (1.0 if (i % 2 == 0) else -1.0) * amp * primary_len
-        new_edges.append({**e,
-                          "vertical_bias": bend,
-                          "sideways_offset": side})
-    out["edges"] = new_edges
-    return out
-
-
 def tighten_base(layout: Dict[str, Any], *, by: float = 0.4) -> Dict[str, Any]:
     """Pull root-side junctions toward their parent on the cross axis.
 
@@ -323,20 +300,16 @@ def spread_horizontal(layout: Dict[str, Any], *, factor: float = 1.7) -> Dict[st
 
 
 def organic_layout(layout: Dict[str, Any], *,
-                   branch_angle: float = 22.0,
-                   length_scale: float = 38.0,
-                   length_decay: float = 0.92,
-                   angle_decay: float  = 0.96,
-                   bend: float = 0.55) -> Dict[str, Any]:
+                   branch_angle: float = 30.0,
+                   length_scale: float = 44.0,
+                   length_decay: float = 0.93,
+                   angle_decay: float  = 0.95,
+                   bend: float = 0.55,
+                   branch_jitter: float = 0.12,
+                   trunk_pull: float = 0.35,
+                   balance: str = "subtree_size") -> Dict[str, Any]:
     """Re-place every node by *growing* the tree from the root outward,
-    branch by branch, like a real tree.
-
-    The root sits at the diagram's "trunk" position. From every junction
-    its two children are placed at ±``branch_angle`` from the parent's
-    growing direction. As we move away from the root the lengths and
-    angles decay so the tree fans gracefully outward without exploding.
-    `fit_to_canvas` is automatically applied at the end so the result
-    fills the canvas without cropping.
+    branch by branch like a real tree.
 
     Parameters
     ----------
@@ -348,13 +321,30 @@ def organic_layout(layout: Dict[str, Any], *,
         generation (so deep branches don't curl back on themselves).
     bend         : edge vertical_bias (0..1) for the renderer; default
         0.55 keeps branches gracefully curving rather than straight.
+    branch_jitter : per-branch deterministic angle perturbation
+        (fraction of the local branch angle). Default 0.12 stops long
+        single-side chains from curling into a tight spiral.
+    trunk_pull : 0..1, how strongly each child's growing direction is
+        pulled back toward the global trunk axis. 0 = pure relative
+        rotation (curls into spirals on long chains); 1 = every branch
+        ignores its parent direction and goes straight up. Default 0.35
+        gives a natural tree look — branches fan but chains stay
+        broadly trunk-aligned.
+    balance : how to assign which child gets the +angle vs −angle slot:
+        ``"subtree_size"`` (default) — larger subtree fans *outward*,
+        smaller stays inboard → visually balanced, no lean.
+        ``"alternate"`` — flip per depth (zigzag).
+        ``"fixed"`` — original (-1, +1) behaviour, lopsided on long
+        L-heavy chains; kept for backwards compatibility.
     """
     import math
-    branch_angle = max(2.0, min(80.0, float(branch_angle)))
-    length_scale = max(5.0, float(length_scale))
-    length_decay = max(0.4, min(1.05, float(length_decay)))
-    angle_decay  = max(0.5, min(1.05, float(angle_decay)))
-    bend         = max(0.05, min(0.95, float(bend)))
+    branch_angle  = max(2.0,  min(80.0, float(branch_angle)))
+    length_scale  = max(5.0,  float(length_scale))
+    length_decay  = max(0.4,  min(1.05, float(length_decay)))
+    angle_decay   = max(0.5,  min(1.05, float(angle_decay)))
+    bend          = max(0.05, min(0.95, float(bend)))
+    branch_jitter = max(0.0,  min(0.7,  float(branch_jitter)))
+    trunk_pull    = max(0.0,  min(1.0,  float(trunk_pull)))
 
     direction = layout.get("direction", "down")
 
@@ -366,6 +356,16 @@ def organic_layout(layout: Dict[str, Any], *,
         children_of[e["to"]].append(e["from"])
         parent_of[e["from"]] = e["to"]
     root_id = next(nid for nid, p in parent_of.items() if p is None)
+
+    # Pre-compute subtree sizes for balance="subtree_size".
+    subtree_size: Dict[str, int] = {}
+    def _size(nid: str) -> int:
+        if nid in subtree_size:
+            return subtree_size[nid]
+        s = 1 + sum(_size(c) for c in children_of[nid])
+        subtree_size[nid] = s
+        return s
+    _size(root_id)
 
     # Root sits in the middle of the trail-end of the canvas.
     W = float(layout["width"])
@@ -388,6 +388,13 @@ def organic_layout(layout: Dict[str, Any], *,
         c, s = math.cos(a), math.sin(a)
         return (v[0] * c - v[1] * s, v[0] * s + v[1] * c)
 
+    def _hash_jitter(node_id: str, depth: int) -> float:
+        """Deterministic ±jitter perturbation, stable per node id."""
+        if branch_jitter == 0.0:
+            return 0.0
+        h = hash((node_id, depth)) & 0xFFFF
+        return ((h / 0xFFFF) * 2.0 - 1.0) * branch_jitter
+
     def _grow(nid, pos, gdir, depth):
         n = nodes_by_id[nid]
         n["x"], n["y"] = pos
@@ -396,11 +403,37 @@ def organic_layout(layout: Dict[str, Any], *,
             return
         L = length_scale * (length_decay ** depth)
         a = branch_angle * (angle_decay ** depth)
-        # children[0] = L (exp side), children[1] = R (ln side)
-        # Place L on the left, R on the right of the growing direction.
-        signs = (-1.0, +1.0)
+
+        # Decide which child gets the −angle vs +angle slot.
+        if len(kids) == 2 and balance == "subtree_size":
+            sz0 = _size(kids[0]); sz1 = _size(kids[1])
+            if sz0 > sz1:
+                # Larger subtree (kids[0]) goes OUTWARD → +angle.
+                signs = (+1.0, -1.0)
+            elif sz1 > sz0:
+                signs = (-1.0, +1.0)
+            else:
+                # tie: alternate by depth parity
+                signs = (-1.0, +1.0) if depth % 2 == 0 else (+1.0, -1.0)
+        elif balance == "alternate":
+            signs = (-1.0, +1.0) if depth % 2 == 0 else (+1.0, -1.0)
+        else:  # "fixed" or unknown
+            if len(kids) == 2:
+                signs = (-1.0, +1.0)
+            else:
+                signs = tuple(-1.0 + 2.0 * i / max(len(kids) - 1, 1)
+                              for i in range(len(kids)))
+
         for child_id, sign in zip(kids, signs):
-            child_dir = _rot(gdir, sign * a)
+            jitter_deg = _hash_jitter(child_id, depth) * a
+            child_dir = _rot(gdir, sign * a + jitter_deg)
+            # Bias child's growing direction back toward the trunk axis
+            # so long chains don't accumulate angular drift into a spiral.
+            if trunk_pull > 0.0:
+                cx = (1.0 - trunk_pull) * child_dir[0] + trunk_pull * growing_dir[0]
+                cy = (1.0 - trunk_pull) * child_dir[1] + trunk_pull * growing_dir[1]
+                norm = math.hypot(cx, cy) or 1.0
+                child_dir = (cx / norm, cy / norm)
             child_pos = (pos[0] + child_dir[0] * L,
                          pos[1] + child_dir[1] * L)
             _grow(child_id, child_pos, child_dir, depth + 1)
@@ -422,8 +455,8 @@ def fit_to_canvas(layout: Dict[str, Any], *,
     canvas with a uniform `margin` on all sides.
 
     Use this AS THE LAST STEP after any post-process that may have pushed
-    nodes off the canvas (spread_horizontal, flowing_sideways with large
-    amplitude, …). Also useful for tightening up a sparse diagram.
+    nodes off the canvas (spread_horizontal, organic_layout, …). Also
+    useful for tightening up a sparse diagram.
 
     Output layout has the same width/height as the input — only node
     coordinates change.

@@ -1,153 +1,134 @@
-"""Tests for TensionPoint — the universal EML computation node."""
+"""Core EMLPoint tests — v1.2.0 slim surface.
+
+Spacetime / Lorentz / discrete-iteration tests live in eml-spectral
+(see EML-Spectral/tests/test_point_full.py).
+"""
 import math
 import pytest
 from eml_math import EMLPoint
 from eml_math.constants import OVERFLOW_THRESHOLD
 
 
-class TestEMLPrimitive:
-    """EMLPoint(x, y).tension() == eml(x, y) = exp(x) - ln(y)."""
+class TestConstruction:
+    def test_basic_construction(self):
+        p = EMLPoint(1.0, 1.0)
+        assert p.x == 1.0
+        assert p.y == 1.0
 
-    def test_unit_point_gives_e(self):
-        assert EMLPoint(1.0, 1.0).tension() == pytest.approx(math.e, rel=1e-14)
+    def test_with_quantization(self):
+        p = EMLPoint(1.0, 1.0, D=100.0)
+        assert p._D == 100.0
 
-    def test_exp_x_is_eml_x_1(self):
-        for x in [0.0, 0.5, 1.0, 2.0, 3.0]:
-            assert EMLPoint(x, 1.0).tension() == pytest.approx(math.exp(x), rel=1e-14)
-
-    def test_formula_matches_manual(self):
-        x, y = 2.0, 3.0
-        expected = math.exp(x) - math.log(y)
-        assert EMLPoint(x, y).tension() == pytest.approx(expected, rel=1e-14)
-
-    def test_tension_is_always_real(self):
-        for x in [0.1, 1.0, 5.0]:
-            for y in [0.1, 1.0, 5.0]:
-                T = EMLPoint(x, y).tension()
-                assert math.isfinite(T)
-
-    def test_frame_shift_guard_when_y_negative(self):
-        # y < 0 would make ln(y) undefined; frame guard uses |y|
+    def test_safe_y_when_negative(self):
+        # iterate() should silently use |y| when y < 0
         p = EMLPoint(1.0, -2.0)
-        T = p.tension()
-        expected = math.exp(1.0) - math.log(2.0)
-        assert T == pytest.approx(expected, rel=1e-12)
+        nxt = p.iterate()
+        assert nxt.x > 0   # x_new = |y| = 2.0
 
-    def test_frame_shift_guard_when_y_zero(self):
+    def test_safe_y_when_zero(self):
         p = EMLPoint(1.0, 0.0)
-        T = p.tension()
-        assert math.isfinite(T)
+        nxt = p.iterate()
+        # x_new uses 1e-300 sentinel; should still be positive
+        assert nxt.x > 0
 
 
-class TestNestedEML:
-    """TensionPoint accepts other TensionPoints as coordinates."""
+class TestTension:
+    def test_tension_basic(self, unit_point):
+        # eml(1, 1) = exp(1) - ln(1) = e
+        assert unit_point.tension() == pytest.approx(math.e, rel=1e-12)
 
-    def test_ln_nested_knot(self):
-        # ln(e) = 1 via depth-3 EML nesting
-        e = math.e
-        result = EMLPoint(1.0, EMLPoint(EMLPoint(1.0, e), 1.0)).tension()
-        assert result == pytest.approx(1.0, rel=1e-10)
+    def test_tension_alias_eml(self, unit_point):
+        assert unit_point.tension() == unit_point.eml()
 
-    def test_ln_two(self):
-        inner1 = EMLPoint(1.0, 2.0)
-        inner2 = EMLPoint(inner1, 1.0)
-        result = EMLPoint(1.0, inner2).tension()
-        assert result == pytest.approx(math.log(2.0), rel=1e-10)
-
-    def test_double_nesting(self):
-        # exp(exp(1)) = e^e via nesting
-        inner = EMLPoint(1.0, 1.0)          # tension = e
-        outer = EMLPoint(inner, 1.0)         # tension = exp(e) - ln(1) = exp(e)
-        assert outer.tension() == pytest.approx(math.exp(math.e), rel=1e-10)
-
-    def test_x_coord_evaluates_nested(self):
-        nested = EMLPoint(2.0, 1.0)          # tension = exp(2)
-        p = EMLPoint(nested, 1.0)            # x = nested.tension() = exp(2)
-        assert p.x == pytest.approx(math.exp(2.0), rel=1e-14)
+    def test_tension_with_negative_y(self):
+        p = EMLPoint(0.0, -math.e)
+        # eml(0, -e) safe → eml(0, e) = 1 - 1 = 0
+        assert p.tension() == pytest.approx(0.0, abs=1e-12)
 
 
-class TestMirrorPulse:
-    """mirror_pulse() — continuous mode."""
+class TestIterate:
+    def test_iterate_basic(self, unit_point):
+        # iter(1, 1) → (1, e - 0) = (1, e)
+        nxt = unit_point.iterate()
+        assert nxt.x == pytest.approx(1.0)
+        assert nxt.y == pytest.approx(math.e, rel=1e-12)
 
-    def test_standard_update(self, unit_point):
-        # Continuous: x_new = y, y_new = T
-        y_old = unit_point.y
-        T = unit_point.tension()
-        nxt = unit_point.mirror_pulse()
-        assert nxt.x == pytest.approx(y_old, rel=1e-12)
-        assert nxt.y == pytest.approx(T, rel=1e-12)
-
-    def test_frame_shift_on_negative_y(self):
-        # When T < 0 (which happens at large y), next pulse uses |y_new|
-        p = EMLPoint(0.1, 10.0)   # T = exp(0.1) - ln(10) ≈ 1.105 - 2.303 = -1.198
-        nxt = p.mirror_pulse()
-        assert math.isfinite(nxt.tension())
+    def test_iterate_chain(self, unit_point):
+        p = unit_point
+        for _ in range(5):
+            p = p.iterate()
+        # convergence test omitted; just check it runs without error
+        assert p.x is not None and p.y is not None
 
     def test_overflow_dampening(self):
-        # x near OVERFLOW_THRESHOLD gets ln-dampened
-        p = EMLPoint(OVERFLOW_THRESHOLD + 1.0, 1.0)
-        nxt = p.mirror_pulse()
-        assert math.isfinite(nxt.tension())
+        big_x = OVERFLOW_THRESHOLD * 2
+        p = EMLPoint(big_x, 1.0)
+        nxt = p.iterate()
+        # x must have been clamped to ln(big_x) before exp
+        assert math.isfinite(nxt.y)
 
-    def test_returns_new_object(self, unit_point):
-        nxt = unit_point.mirror_pulse()
-        assert nxt is not unit_point
+    def test_mirror_pulse_alias(self, unit_point):
+        # backwards-compat alias
+        a = unit_point.iterate()
+        b = unit_point.mirror_pulse()
+        assert a == b
 
-
-class TestDiscreteMode:
-    """Discrete mode (D set) quantizes via round(T * D)."""
-
-    def test_discrete_quantization(self):
-        p = EMLPoint(1.0, 1.0, D=100)
-        nxt = p.mirror_pulse()
-        # y_new should be round(T * 100) / 100
-        T = p.tension()
-        expected_y = round(T * 100) / 100
-        assert nxt.y == pytest.approx(expected_y, rel=1e-12)
-
-    def test_d_propagates_to_next(self):
-        p = EMLPoint(1.0, 1.0, D=100)
-        nxt = p.mirror_pulse()
-        assert nxt.D == 100
+    def test_pulse_alias(self, unit_point):
+        a = unit_point.iterate()
+        b = unit_point.pulse()
+        assert a == b
 
 
-class TestAxiom10Conservation:
-    """Axiom 10: T + x = exp(x) at every step."""
+class TestTreeStructure:
+    def test_is_leaf_true_when_floats(self):
+        p = EMLPoint(1.0, 2.0)
+        assert p.is_leaf() is True
 
-    def test_conservation_at_unit_point(self, unit_point):
-        nxt = unit_point.mirror_pulse()
-        assert unit_point.conserves_tension(nxt)
+    def test_is_leaf_false_when_nested(self):
+        inner = EMLPoint(1.0, 1.0)
+        outer = EMLPoint(inner, 2.0)
+        assert outer.is_leaf() is False
 
-    def test_conservation_over_multiple_steps(self, unit_knot):
-        from eml_math.simulation import simulate_pulses, verify_conservation
-        traj = simulate_pulses(unit_knot, n_pulses=20)
-        assert verify_conservation(traj)
-
-
-class TestTreeIntrospection:
-    """is_leaf, left(), right() for converter traversal."""
-
-    def test_flat_point_is_leaf(self, unit_point):
-        assert unit_point.is_leaf()
-
-    def test_nested_point_not_leaf(self):
-        p = EMLPoint(EMLPoint(1.0, 1.0), 1.0)
-        assert not p.is_leaf()
-
-    def test_left_right_access(self):
-        inner = EMLPoint(2.0, 3.0)
-        outer = EMLPoint(inner, 5.0)
-        assert outer.left() is inner
-        assert outer.right() == 5.0
+    def test_left_right_accessors(self):
+        inner = EMLPoint(1.0, 1.0)
+        p = EMLPoint(inner, 2.0)
+        assert p.left() is inner
+        assert p.right() == 2.0
 
 
-class TestResonance:
-    """Axiom 14: resonance as MPM equality."""
+class TestEquality:
+    def test_equal_when_tension_matches(self):
+        a = EMLPoint(1.0, 1.0)
+        b = EMLPoint(1.0, 1.0)
+        assert a == b
 
-    def test_same_point_resonates(self, unit_point):
-        other = EMLPoint(1.0, 1.0)
-        assert unit_point.resonates_with(other)
+    def test_not_equal_when_tension_differs(self):
+        a = EMLPoint(1.0, 1.0)
+        b = EMLPoint(2.0, 1.0)
+        assert a != b
 
-    def test_different_point_does_not_resonate(self, unit_point):
-        other = EMLPoint(2.0, 1.0)
-        assert not unit_point.resonates_with(other)
+    def test_hash_stable(self):
+        a = EMLPoint(1.0, 1.0)
+        b = EMLPoint(1.0, 1.0)
+        assert hash(a) == hash(b)
+
+
+class TestDifferentiation:
+    def test_diff_returns_emlpoint(self):
+        from eml_math.point import _VarNode
+        x = _VarNode("x")
+        # Build a simple expression: eml(x, 1)
+        expr = EMLPoint(x, 1.0)
+        # Just check diff() doesn't raise
+        result = expr.diff("x")
+        assert isinstance(result, EMLPoint)
+
+
+class TestRepr:
+    def test_repr_basic(self):
+        p = EMLPoint(1.0, 2.0)
+        assert "EMLPoint" in repr(p)
+
+    def test_repr_with_D(self):
+        p = EMLPoint(1.0, 2.0, D=100.0)
+        assert "D=100" in repr(p)

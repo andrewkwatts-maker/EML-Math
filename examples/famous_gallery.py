@@ -26,7 +26,7 @@ from eml_math.tree import to_compact
 from eml_math.web import get_flow_js
 from eml_math.flow_layout import (
     to_layout, render_png, render_pdf,
-    gentle_curves, flowing_sideways, tighten_base, spread_horizontal,
+    gentle_curves, tighten_base, spread_horizontal,
     fit_to_canvas, organic_layout,
 )
 
@@ -49,8 +49,6 @@ STYLES = {
     "organic":  _pipe(lambda L: organic_layout(L,
                                                branch_angle=22.0,
                                                length_scale=42.0)),
-    "flowing":  _pipe(lambda L: flowing_sideways(L, amplitude=0.25, bend=0.6),
-                      fit_to_canvas),
 }
 
 WIDTH, HEIGHT = 720, 440

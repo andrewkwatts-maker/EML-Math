@@ -234,6 +234,78 @@ def _to_screen(
     _t(node)
 
 
+def _relax_layout(
+    node: "EMLTreeNode",
+    *,
+    direction: str,
+    passes: int = 4,
+    min_spacing: float = 22.0,
+) -> None:
+    """Iterative bottom-up / top-down relaxation that fixes two formal-layout
+    pathologies:
+
+    1. The base-wiggle widening problem — deep pure-EML chains accumulate
+       cross-axis offset because each junction sits at the average of its
+       children, and long single-side chains drag that average sideways.
+    2. Sibling-leaf overlaps — short stub branches (0/1 leaves) and crowded
+       layers can cause two leaves to land on top of each other.
+
+    Strategy: alternate up/down sweeps. The UP-sweep recomputes each
+    parent's cross-axis position as the *median* of its visible-leaf
+    descendants (resists outlier-pull from long chains). The DOWN-sweep
+    pushes overlapping siblings apart on the cross axis until they
+    satisfy the `min_spacing` minimum.
+    """
+    cross_attr = "_fx" if direction in ("down", "up") else "_fy"
+
+    def _leaves_under(n):
+        if not n.children:
+            return [n]
+        out = []
+        for c in n.children:
+            out.extend(_leaves_under(c))
+        return out
+
+    def _walk_post(n):
+        for c in n.children:
+            _walk_post(c)
+        if n.children:
+            # Median of own immediate children's cross coords — resists drift
+            # from a single long chain pulling the average sideways.
+            xs = sorted(getattr(c, cross_attr) for c in n.children)
+            mid = xs[len(xs) // 2] if len(xs) % 2 == 1 else (xs[len(xs)//2 - 1] + xs[len(xs)//2]) / 2.0
+            setattr(n, cross_attr, mid)
+
+    def _siblings_at_each_level(root):
+        """Yield lists of nodes that share a parent, level by level."""
+        from collections import defaultdict
+        levels = defaultdict(list)
+        def _walk(n, depth, parent):
+            levels[(depth, id(parent))].append(n)
+            for c in n.children:
+                _walk(c, depth + 1, n)
+        _walk(root, 0, None)
+        for grp in levels.values():
+            if len(grp) > 1:
+                yield grp
+
+    def _spread_overlapping_siblings(root):
+        """Push siblings apart so consecutive crosses are >= min_spacing."""
+        for grp in _siblings_at_each_level(root):
+            grp.sort(key=lambda n: getattr(n, cross_attr))
+            # Sweep left→right: if two too close, push the right one further.
+            for i in range(1, len(grp)):
+                gap = getattr(grp[i], cross_attr) - getattr(grp[i-1], cross_attr)
+                if gap < min_spacing:
+                    push = (min_spacing - gap) / 2.0
+                    setattr(grp[i-1], cross_attr, getattr(grp[i-1], cross_attr) - push)
+                    setattr(grp[i],   cross_attr, getattr(grp[i],   cross_attr) + push)
+
+    for _ in range(max(1, int(passes))):
+        _walk_post(node)              # up-sweep: tighten parents to children's median
+        _spread_overlapping_siblings(node)  # down-sweep: push apart
+
+
 def _assign_colors(
     node: "EMLTreeNode",
     leaf_color: dict,
@@ -343,6 +415,9 @@ def _stub_inline_leaves(
         return False
 
     # Distance from parent to stub leaf, in the same screen-units _to_screen used.
+    # The stubs sit MOSTLY sideways from the parent (cross axis) with only a
+    # short primary-axis offset — they shouldn't push back along the trunk
+    # direction or they widen the visual base of the tree as you scan down.
     stub_offset = max(28.0, float(label_font_size) * 1.6)
 
     def _walk(parent):
@@ -354,8 +429,8 @@ def _stub_inline_leaves(
                 # Cross-axis offset: spread children evenly around parent.
                 # For binary parent: L-child gets -ve offset, R-child +ve.
                 t = (i / (n - 1) - 0.5) if n > 1 else 0.0
-                cross_off = t * 2 * stub_offset    # left-of-parent for L, right for R
-                primary_off = stub_offset * 0.6   # short way back along the primary axis
+                cross_off   = t * 2 * stub_offset   # left-of-parent for L, right for R
+                primary_off = stub_offset * 0.3     # half the previous (was 0.6) — keep stubs shorter on the primary axis so they don't widen the base wiggle
                 if direction == "down":
                     child._fx = parent._fx + cross_off
                     child._fy = parent._fy - primary_off
@@ -406,6 +481,8 @@ def _layout(
     fixed_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,
     random_palette: bool = False,
+    relax_passes: int = 4,
+    min_spacing: float = 22.0,
 ) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
     """Returns (binarised_root, leaves_in_cross-axis-order)."""
     if expand_symbols:
@@ -428,6 +505,15 @@ def _layout(
         margin_lead=margin_lead, margin_trail=margin_trail,
         margin_cross=margin_cross,
     )
+
+    # Iterative bottom-up / top-down relaxation: tightens the base wiggle
+    # caused by long single-side chains pulling parents off-centre, and
+    # spreads any sibling overlaps so leaves don't sit on top of each
+    # other. Skipped for trivial trees (fewer than 4 leaves — nothing to
+    # relax).
+    if relax_passes > 0 and len(leaves) >= 4:
+        _relax_layout(node, direction=direction,
+                      passes=relax_passes, min_spacing=min_spacing)
 
     # Colour assignment: equal labels share a colour. Fixed-colour labels
     # (e.g. 0 and 1) are pinned by the caller-supplied (or default) map.
@@ -474,6 +560,8 @@ def flow_svg(
     omit_identity_labels: bool = True,       # don't print the number for L=0 / R=1 — the stub implies it
     random_palette: bool = False,            # use a per-label random pastel instead of the ordered palette
     show_sentinel_labels: bool = False,      # legacy, no-op (every leaf is a real input)
+    auto_height: bool = True,                # grow canvas height to fit deep trees
+    min_layer_height: float = 38.0,
     label_font_size: int = 18,
     output_font_size: int = 22,
     edge_width: float = 3.0,
@@ -537,6 +625,21 @@ def flow_svg(
         # zone above it is at least half the canvas tall. A fixed multiplier
         # of label_font_size doesn't scale with canvas size — this does.
         primary_label_size = max(primary_label_size, height * 0.5)
+
+    # Dynamic-height growth: deep pure-EML trees need more vertical room
+    # so the wiggle reads as winding rather than wide back-and-forth at
+    # the base. Each layer of tree depth gets at least `min_layer_height`
+    # pixels along the primary axis.
+    if auto_height:
+        depth = _height(preview_root)
+        primary_axis_needed = (
+            primary_label_size + primary_output_size +
+            max(1, depth) * float(min_layer_height)
+        )
+        if direction in ("down", "up"):
+            height = max(int(height), int(primary_axis_needed))
+        else:
+            width  = max(int(width),  int(primary_axis_needed))
 
     fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors
@@ -1006,6 +1109,8 @@ def _flow_png_pillow(
     omit_identity_labels: bool = True,
     random_palette: bool = False,
     show_sentinel_labels: bool = False,
+    auto_height: bool = True,
+    min_layer_height: float = 38.0,
     label_font_size: int = 18,
     output_font_size: int = 22,
     edge_width: float = 3.0,
@@ -1051,6 +1156,21 @@ def _flow_png_pillow(
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
     half_label_w   = 0.5 * 0.6 * label_font_size * max_label_len
     cross_margin   = max(40.0, half_label_w + 12.0)
+
+    # Dynamic-height growth — see flow_svg() for the rationale. Re-derive
+    # canvas dims if depth × min_layer_height exceeds the requested ones.
+    if auto_height:
+        depth = _height(preview_root)
+        primary_axis_needed = (
+            primary_label_size + primary_output_size +
+            max(1, depth) * float(min_layer_height)
+        )
+        if direction in ("down", "up"):
+            height = max(int(height), int(primary_axis_needed))
+            H = int(height * scale)
+        else:
+            width  = max(int(width),  int(primary_axis_needed))
+            W = int(width * scale)
 
     fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors

@@ -76,29 +76,14 @@ True
 """
 
 from eml_math.constants import (
-    PLANCK_D,
-    PLANCK_LENGTH,
-    PLANCK_ENERGY,
-    FLIP_YIELD,
-    FLIP_RATIO,
     OVERFLOW_THRESHOLD,
     DEFAULT_D,
+    FLIP_YIELD,
+    FLIP_RATIO,
+    PLANCK_D,
 )
 
 from eml_math.point import EMLPoint, _VarNode
-from eml_math.state import EMLState
-from eml_math.pair import EMLPair
-from eml_math.simulation import (
-    simulate_pulses,
-    simulate_flips,
-    quantized_trajectory,
-    tension_series,
-    rho_series,
-    phase_series,
-    verify_conservation,
-    frame_shift_count,
-    find_resonance_bands,
-)
 
 # Formula discovery / equation compression
 from eml_math.discover import (
@@ -112,19 +97,6 @@ from eml_math.discover import (
     get,
 )
 
-# v1.0.0 geometry and physics layer
-from eml_math.momentum import FourMomentum
-from eml_math.discrete import planck_delta, lattice_distance, is_lattice_neighbor
-from eml_math.metric import MetricTensor
-from eml_math.ndim import EMLNDVector, e8_lattice_points, leech_lattice_points
-from eml_math.octonion import Octonion, basis_octonion
-from eml_math.fourvector import MinkowskiFourVector
-from eml_math.geometric_algebra import EMLMultivector
-
-# Exceptional algebra layer (v1.1.0)
-from eml_math.freudenthal import FreudenthalTripleSystem
-from eml_math.e7_56 import E7_56
-from eml_math.e8_248 import E8_248, E8xE8
 from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
 from eml_math.operators import eml_scalar, eml_pi, eml_vec
 from eml_math.tree import (
@@ -135,7 +107,7 @@ from eml_math.flow import flow_svg, flow_html, flow_png, flow_pdf, DEFAULT_PALET
 from eml_math.flow_layout import (
     to_layout, render_svg as render_layout_svg,
     render_png as render_layout_png, render_pdf as render_layout_pdf,
-    gentle_curves, flowing_sideways, tighten_base, spread_horizontal,
+    gentle_curves, tighten_base, spread_horizontal,
     fit_to_canvas, organic_layout,
 )
 from eml_math.symbols import Symbol, SYMBOLS, lookup, construct, register
@@ -147,35 +119,24 @@ from eml_math.famous import (
 )
 from eml_math.web import get_flow_js, FLOW_JS_PATH
 
-iterate = simulate_pulses
+# Convenience alias — repeated `iterate()` calls salvage the v1.x pulse
+# behaviour. For trajectories use `eml_spectral.spectral_flow` (sister
+# package, sole runtime dep is `eml-math`).
+iterate = lambda point: point.iterate()
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __author__ = "Andrew K Watts"
 
 __all__ = [
-    # Constants
-    "PLANCK_D",
-    "PLANCK_LENGTH",
-    "PLANCK_ENERGY",
-    "FLIP_YIELD",
-    "FLIP_RATIO",
+    # Constants (slim — physics constants live in eml-spectral)
     "OVERFLOW_THRESHOLD",
     "DEFAULT_D",
-    # Core types
+    "FLIP_YIELD",
+    "FLIP_RATIO",
+    "PLANCK_D",
+    # Core types (EMLPair is in eml-spectral)
     "EMLPoint",
-    "EMLPair",
-    "EMLState",
     "iterate",
-    # Simulation
-    "simulate_pulses",
-    "simulate_flips",
-    "quantized_trajectory",
-    "tension_series",
-    "rho_series",
-    "phase_series",
-    "verify_conservation",
-    "frame_shift_count",
-    "find_resonance_bands",
     # Formula discovery / equation compression
     "Searcher",
     "SearchResult",
@@ -185,29 +146,16 @@ __all__ = [
     "compress_latex",
     "decompress",
     "get",
-    # Geometry and physics (v1.0.0)
-    "FourMomentum",
-    "planck_delta",
-    "lattice_distance",
-    "is_lattice_neighbor",
-    "MetricTensor",
-    "EMLNDVector",
-    "e8_lattice_points",
-    "leech_lattice_points",
-    "Octonion",
-    "basis_octonion",
-    "MinkowskiFourVector",
-    "EMLMultivector",
-    # Exceptional algebra (v1.1.0)
-    "FreudenthalTripleSystem",
-    "E7_56",
-    "E8_248",
-    "E8xE8",
-    # EML expression tree (v1.1.0)
+    # EML expression tree
     "EMLTreeNode",
     "NodeKind",
     "EML_EXPANSIONS",
     "parse_eml_tree",
+    # Compact tree serialisation (JSON-friendly array form)
+    "to_compact",
+    "from_compact",
+    "KIND_CHAR",
+    "CHAR_KIND",
     # Evaluator
     "EMLEvaluator",
     "eml_eval",
@@ -227,7 +175,6 @@ __all__ = [
     "render_layout_png",
     "render_layout_pdf",
     "gentle_curves",
-    "flowing_sideways",
     "tighten_base",
     "spread_horizontal",
     "fit_to_canvas",
@@ -238,11 +185,6 @@ __all__ = [
     "get_famous",
     "famous_by_category",
     "all_famous_equations",
-    # Compact tree serialisation (JSON-friendly array form)
-    "to_compact",
-    "from_compact",
-    "KIND_CHAR",
-    "CHAR_KIND",
     # Named symbol library (e, π, φ, √2, …)
     "Symbol",
     "SYMBOLS",
