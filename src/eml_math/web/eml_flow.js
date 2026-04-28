@@ -98,24 +98,6 @@
         return out;
     }
 
-    function treeHeight(n) {
-        if (!n.children || !n.children.length) return 0;
-        return 1 + Math.max(...n.children.map(treeHeight));
-    }
-
-    // ── Layout ─────────────────────────────────────────────────────────
-
-    function assignXY(n, leafX, top, layerH) {
-        const h = treeHeight(n);
-        n._fy = top + h * layerH;
-        if (!n.children || !n.children.length) {
-            n._fx = leafX.get(n);
-            return;
-        }
-        n.children.forEach(c => assignXY(c, leafX, top, layerH));
-        n._fx = n.children.reduce((s, c) => s + c._fx, 0) / n.children.length;
-    }
-
     function assignColors(n, leafColor) {
         if (!n.children || !n.children.length) {
             n._fcolor = leafColor.get(n);
@@ -133,31 +115,120 @@
 
     // ── Public renderer ─────────────────────────────────────────────────
 
+    const DIRECTIONS = ['down', 'up', 'right', 'left'];
+
+    function _height(n) {
+        if (!n.children || !n.children.length) return 0;
+        return 1 + Math.max(...n.children.map(_height));
+    }
+
+    function assignLogical(n, leafCross) {
+        n._fdepth = _height(n);
+        if (!n.children || !n.children.length) {
+            n._fcross = leafCross.get(n);
+            return;
+        }
+        n.children.forEach(c => assignLogical(c, leafCross));
+        n._fcross = n.children.reduce((s, c) => s + c._fcross, 0) / n.children.length;
+    }
+
+    function toScreen(node, dir, w, h, lead, trail, cross) {
+        const H = Math.max(node._fdepth, 1);
+        function _t(n) {
+            const p = n._fdepth / H;
+            const c = n._fcross;
+            if (dir === 'down') {
+                const span = h - lead - trail; const cspan = w - 2 * cross;
+                n._fy = lead + p * span;
+                n._fx = cross + c * cspan;
+            } else if (dir === 'up') {
+                const span = h - lead - trail; const cspan = w - 2 * cross;
+                n._fy = (h - lead) - p * span;
+                n._fx = cross + c * cspan;
+            } else if (dir === 'right') {
+                const span = w - lead - trail; const cspan = h - 2 * cross;
+                n._fx = lead + p * span;
+                n._fy = cross + c * cspan;
+            } else if (dir === 'left') {
+                const span = w - lead - trail; const cspan = h - 2 * cross;
+                n._fx = (w - lead) - p * span;
+                n._fy = cross + c * cspan;
+            } else {
+                throw new Error('unknown direction: ' + dir);
+            }
+            (n.children || []).forEach(_t);
+        }
+        _t(node);
+    }
+
+    function curvePath(cx, cy, px, py, dir, stroke, edgeWidth) {
+        let d;
+        if (dir === 'down' || dir === 'up') {
+            const m = (cy + py) / 2;
+            d = `M${cx.toFixed(1)},${cy.toFixed(1)} C${cx.toFixed(1)},${m.toFixed(1)} ${px.toFixed(1)},${m.toFixed(1)} ${px.toFixed(1)},${py.toFixed(1)}`;
+        } else {
+            const m = (cx + px) / 2;
+            d = `M${cx.toFixed(1)},${cy.toFixed(1)} C${m.toFixed(1)},${cy.toFixed(1)} ${m.toFixed(1)},${py.toFixed(1)} ${px.toFixed(1)},${py.toFixed(1)}`;
+        }
+        return `<path d="${d}" stroke="${stroke}" stroke-width="${edgeWidth}" fill="none" stroke-linecap="round"/>`;
+    }
+
+    function outputPosition(dir, w, h, trail) {
+        if (dir === 'down')  return [w / 2, h - trail * 0.35];
+        if (dir === 'up')    return [w / 2, trail * 0.35];
+        if (dir === 'right') return [w - trail * 0.35, h / 2];
+        if (dir === 'left')  return [trail * 0.35, h / 2];
+        return [w / 2, h - trail * 0.35];
+    }
+
+    function labelOffset(x, y, dir, fs, end) {
+        const pad = 12;
+        if (dir === 'down')  return [x, end === 'lead' ? y - pad : y + pad + fs];
+        if (dir === 'up')    return [x, end === 'lead' ? y + pad + fs : y - pad];
+        if (dir === 'right') return [end === 'lead' ? x - pad : x + pad, y + fs * 0.35];
+        return [end === 'lead' ? x + pad : x - pad, y + fs * 0.35];
+    }
+
+    function textAnchor(dir, end) {
+        if (dir === 'down' || dir === 'up') return 'middle';
+        if (dir === 'right') return end === 'lead' ? 'end' : 'start';
+        return end === 'lead' ? 'start' : 'end';
+    }
+
     /**
      * Render an EML tree as an SVG flow diagram.
      *
-     * @param {Array|Object} treeArr  Compact array form (preferred) or {label,kind,children} dict.
+     * @param {Array|Object} treeArr  Compact array form (preferred) or dict.
      * @param {Object} [opts]
      * @param {number} [opts.width=720]            Canvas width in px.
      * @param {number} [opts.height=420]           Canvas height in px.
-     * @param {string} [opts.outputLabel='Out']    Label drawn at the bottom.
-     * @param {Array}  [opts.palette]              [[r,g,b], …]; defaults to DEFAULT_PALETTE.
-     * @param {number} [opts.labelFontSize=16]     Pixel size for input labels.
-     * @param {number} [opts.outputFontSize=20]    Pixel size for the output label.
-     * @param {number} [opts.edgeWidth=3]          Stroke width of branch curves.
-     * @param {number} [opts.junctionRadius=4]     Radius of the merge dots.
-     * @returns {string} A self-contained <svg>…</svg> string.
+     * @param {string} [opts.direction='down']     'down' | 'up' | 'right' | 'left'.
+     * @param {string|Array} [opts.outputLabel='Out']  String, or list of strings for multi-valued formulas.
+     * @param {boolean} [opts.expandSymbols=false] Replace named-symbol leaves with their EML construction.
+     * @param {Array}  [opts.palette]
+     * @param {number} [opts.labelFontSize=16]
+     * @param {number} [opts.outputFontSize=20]
+     * @param {number} [opts.edgeWidth=3]
+     * @param {number} [opts.junctionRadius=4]
      */
     function renderFlowSvg(treeArr, opts) {
         opts = opts || {};
         const width          = opts.width          || 720;
         const height         = opts.height         || 420;
-        const outputLabel    = opts.outputLabel    || 'Out';
+        const direction      = opts.direction      || 'down';
+        const outputLabelArg = opts.outputLabel    || 'Out';
         const palette        = opts.palette        || DEFAULT_PALETTE;
         const labelFontSize  = opts.labelFontSize  || 16;
         const outputFontSize = opts.outputFontSize || 20;
         const edgeWidth      = opts.edgeWidth      || 3;
         const junctionRadius = opts.junctionRadius || 4;
+
+        if (DIRECTIONS.indexOf(direction) < 0) {
+            throw new Error('direction must be one of ' + DIRECTIONS.join(', '));
+        }
+
+        const isMulti = Array.isArray(outputLabelArg);
+        const outputLabels = isMulti ? outputLabelArg.slice() : [outputLabelArg];
 
         let node = inflate(treeArr);
         node = binarize(node);
@@ -166,27 +237,22 @@
         if (!leaves.length) return '';
         const maxLabelLen = Math.max(...leaves.map(l => (l.label || '').length), 1);
         const halfLabelW  = 0.5 * 0.6 * labelFontSize * maxLabelLen;
-        const marginLR    = Math.max(40, halfLabelW + 12);
-        const marginTop   = labelFontSize * 2.2;
-        const marginBot   = outputFontSize * 2.0;
+        const crossMargin = Math.max(40, halfLabelW + 12);
+        const leadMargin  = labelFontSize * 2.2;
+        let trailMargin   = outputFontSize * 2.0;
+        if (isMulti) trailMargin *= 1.6;
 
-        const leafX = new Map();
+        const leafCross = new Map();
         if (leaves.length === 1) {
-            leafX.set(leaves[0], width / 2);
+            leafCross.set(leaves[0], 0.5);
         } else {
-            const usable = width - 2 * marginLR;
-            leaves.forEach((l, i) => {
-                leafX.set(l, marginLR + usable * i / (leaves.length - 1));
-            });
+            leaves.forEach((l, i) => leafCross.set(l, i / (leaves.length - 1)));
         }
-        const h = Math.max(treeHeight(node), 1);
-        const layerH = (height - marginTop - marginBot) / h;
-        assignXY(node, leafX, marginTop, layerH);
+        assignLogical(node, leafCross);
+        toScreen(node, direction, width, height, leadMargin, trailMargin, crossMargin);
 
         const leafColor = new Map();
-        leaves.forEach((l, i) => {
-            leafColor.set(l, palette[i % palette.length]);
-        });
+        leaves.forEach((l, i) => leafColor.set(l, palette[i % palette.length]));
         assignColors(node, leafColor);
 
         const parts = [`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" font-family="Inter, Helvetica, Arial, sans-serif">`];
@@ -194,38 +260,60 @@
         function emitEdges(n) {
             if (!n.children || !n.children.length) return;
             for (const c of n.children) {
-                const my = (n._fy + c._fy) / 2;
-                parts.push(`<path d="M${c._fx.toFixed(1)},${c._fy.toFixed(1)} C${c._fx.toFixed(1)},${my.toFixed(1)} ${n._fx.toFixed(1)},${my.toFixed(1)} ${n._fx.toFixed(1)},${n._fy.toFixed(1)}" stroke="${rgbHex(c._fcolor)}" stroke-width="${edgeWidth}" fill="none" stroke-linecap="round"/>`);
+                parts.push(curvePath(c._fx, c._fy, n._fx, n._fy, direction, rgbHex(c._fcolor), edgeWidth));
                 emitEdges(c);
             }
         }
         emitEdges(node);
 
-        // Synthetic edge from leaf to output position when binarisation
-        // collapsed the entire tree to a single leaf.
+        const [outX, outY] = outputPosition(direction, width, height, trailMargin);
         if (!node.children || !node.children.length) {
-            const oy = height - marginBot;
-            const my = (node._fy + oy) / 2;
-            parts.push(`<path d="M${node._fx.toFixed(1)},${node._fy.toFixed(1)} C${node._fx.toFixed(1)},${my.toFixed(1)} ${(width/2).toFixed(1)},${my.toFixed(1)} ${(width/2).toFixed(1)},${oy.toFixed(1)}" stroke="${rgbHex(node._fcolor)}" stroke-width="${edgeWidth}" fill="none" stroke-linecap="round"/>`);
+            parts.push(curvePath(node._fx, node._fy, outX, outY, direction, rgbHex(node._fcolor), edgeWidth));
         }
 
         function emitJunctions(n) {
             if (!n.children || !n.children.length) return;
             parts.push(`<circle cx="${n._fx.toFixed(1)}" cy="${n._fy.toFixed(1)}" r="${junctionRadius}" fill="${rgbHex(n._fcolor)}" stroke="#222" stroke-width="0.8"/>`);
-            for (const c of n.children) emitJunctions(c);
+            (n.children || []).forEach(emitJunctions);
         }
         emitJunctions(node);
 
+        // Leaf labels at the LEAD end.
         for (const l of leaves) {
-            parts.push(`<text x="${l._fx.toFixed(1)}" y="${(l._fy - 12).toFixed(1)}" fill="${rgbHex(l._fcolor)}" text-anchor="middle" font-weight="700" font-size="${labelFontSize}">${escSvg(l.label || '')}</text>`);
+            const [lx, ly] = labelOffset(l._fx, l._fy, direction, labelFontSize, 'lead');
+            parts.push(`<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="${rgbHex(l._fcolor)}" text-anchor="${textAnchor(direction, 'lead')}" font-weight="700" font-size="${labelFontSize}">${escSvg(l.label || '')}</text>`);
         }
-        parts.push(`<text x="${(width/2).toFixed(1)}" y="${(height - marginBot * 0.35).toFixed(1)}" text-anchor="middle" font-weight="700" font-size="${outputFontSize}" fill="#222">${escSvg(outputLabel)}</text>`);
+
+        // Output label(s) at the TRAIL end.
+        if (isMulti && outputLabels.length > 1) {
+            const n = outputLabels.length;
+            const spread = Math.max(60, outputFontSize * 1.2 * Math.max.apply(null, outputLabels.map(s => s.length)));
+            outputLabels.forEach((lbl, i) => {
+                const offset = (i - (n - 1) / 2) * spread;
+                let ox = outX, oy = outY;
+                if (direction === 'down' || direction === 'up') ox = outX + offset;
+                else oy = outY + offset;
+                parts.push(curvePath(node._fx, node._fy, ox, oy, direction, rgbHex(node._fcolor), edgeWidth));
+                parts.push(`<text x="${ox.toFixed(1)}" y="${oy.toFixed(1)}" text-anchor="middle" font-weight="700" font-size="${outputFontSize}" fill="#222">${escSvg(lbl)}</text>`);
+            });
+            // ± indicator near the root junction
+            let ix = node._fx, iy = node._fy;
+            if (direction === 'down') iy += 16;
+            else if (direction === 'up') iy -= 16;
+            else if (direction === 'right') ix += 16;
+            else ix -= 16;
+            parts.push(`<text x="${ix.toFixed(1)}" y="${iy.toFixed(1)}" text-anchor="middle" font-size="${outputFontSize}" fill="#666" font-style="italic">±</text>`);
+        } else {
+            parts.push(`<text x="${outX.toFixed(1)}" y="${outY.toFixed(1)}" text-anchor="${textAnchor(direction, 'trail')}" font-weight="700" font-size="${outputFontSize}" fill="#222">${escSvg(outputLabels[0])}</text>`);
+        }
+
         parts.push('</svg>');
         return parts.join('\n');
     }
 
     return {
         DEFAULT_PALETTE,
+        DIRECTIONS,
         KIND_MAP,
         inflate,
         binarize,

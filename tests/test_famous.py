@@ -105,7 +105,10 @@ def test_renders_svg(name: str) -> None:
     svg = eq.flow_svg(width=600, height=400)
     assert svg.startswith("<svg")
     assert "</svg>" in svg
-    assert eq.output in svg     # the output label must appear
+    # the output label(s) must appear — handle both string and tuple forms
+    labels = [eq.output] if isinstance(eq.output, str) else list(eq.output)
+    for lbl in labels:
+        assert lbl in svg, f"output label {lbl!r} missing from SVG"
 
 
 @pytest.mark.parametrize("name", sorted(FAMOUS.keys()))

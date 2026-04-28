@@ -32,6 +32,18 @@ class TestPackagedJS:
         s = get_flow_js()
         assert "binarize" in s
 
+    def test_exposes_directions(self):
+        s = get_flow_js()
+        assert "DIRECTIONS" in s
+        for d in ("down", "up", "right", "left"):
+            assert f"'{d}'" in s
+
+    def test_exposes_multi_output(self):
+        s = get_flow_js()
+        # multi-output uses ± indicator
+        assert "isMulti" in s
+        assert "±" in s
+
     def test_kind_map_matches_python(self):
         s = get_flow_js()
         # Each KIND_CHAR entry should appear in the JS KIND_MAP
