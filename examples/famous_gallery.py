@@ -26,17 +26,28 @@ def main() -> None:
     eqs = all_equations()
     print(f"Rendering {len(eqs)} famous equations -> {out_dir}/")
 
-    # Per-equation PNG + PDF, in both standard and merged-inputs variants.
+    # Per-equation PNG + PDF, across the visualisation-config matrix.
+    # Each variant is a config combination of three independent toggles:
+    #   merge_inputs       — deduplicate identical leaves (1-to-N redirectors)
+    #   inline_constants   — numeric constants render at the branch endpoint
+    #   expand_symbols     — named symbols (e, φ, √2, …) get expanded into
+    #                         their EML constructions in the diagram
+    variants = [
+        ("",                       dict()),
+        ("_merged",                dict(merge_inputs=True)),
+        ("_inline",                dict(inline_constants=True)),
+        ("_inline_merged",         dict(inline_constants=True, merge_inputs=True)),
+        ("_expanded",              dict(expand_symbols=True)),
+        ("_expanded_merged",       dict(expand_symbols=True, merge_inputs=True)),
+        ("_expanded_inline",       dict(expand_symbols=True, inline_constants=True)),
+    ]
     for eq in eqs:
-        png      = eq.flow_png(width=720, height=440, merge_inputs=False)
-        png_merg = eq.flow_png(width=720, height=440, merge_inputs=True)
-        pdf      = eq.flow_pdf(width=720, height=440, merge_inputs=False)
-        pdf_merg = eq.flow_pdf(width=720, height=440, merge_inputs=True)
-        (out_dir / "png" / f"{eq.name}.png").write_bytes(png)
-        (out_dir / "png" / f"{eq.name}_merged.png").write_bytes(png_merg)
-        (out_dir / "pdf" / f"{eq.name}.pdf").write_bytes(pdf)
-        (out_dir / "pdf" / f"{eq.name}_merged.pdf").write_bytes(pdf_merg)
-        print(f"  {eq.category:9s} {eq.name:24s}  PNG {len(png):>6d} / merged {len(png_merg):>6d}")
+        for suffix, kw in variants:
+            png = eq.flow_png(width=720, height=440, **kw)
+            pdf = eq.flow_pdf(width=720, height=440, **kw)
+            (out_dir / "png" / f"{eq.name}{suffix}.png").write_bytes(png)
+            (out_dir / "pdf" / f"{eq.name}{suffix}.pdf").write_bytes(pdf)
+        print(f"  {eq.category:9s} {eq.name}")
 
     # Standalone HTML viewer that re-renders client-side via the bundled JS
     js  = get_flow_js()

@@ -801,7 +801,7 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
 #   compound (sin, cos, …) — unexpandable; left as-is
 
 def _bot() -> EMLTreeNode:
-    return EMLTreeNode(label="⊥", kind=NodeKind.BOTTOM)
+    return EMLTreeNode(label="0", kind=NodeKind.BOTTOM)
 
 def _one() -> EMLTreeNode:
     return EMLTreeNode(label="1", kind=NodeKind.SCALAR)

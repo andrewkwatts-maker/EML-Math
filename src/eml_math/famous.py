@@ -68,48 +68,35 @@ class FamousEquation:
     category:    str                  # 'physics' | 'geometry' | 'math'
     notes:       str = ""
 
-    def parse(self, *, mode: str = "compact"):
-        """Return the parsed :class:`EMLTreeNode`.
+    def parse(self):
+        """Parse the EML expression into the pure-EML binary tree.
 
-        Parameters
-        ----------
-        mode :
-            ``"compact"`` (default) — operator-level tree (``mul``, ``pow``, …)
-            with internal nodes binarised at render time. The flow diagram
-            shows only the real inputs and the output, with each junction
-            being a binary merge of two streams. Cleanest visualisation.
-            ``"pure"``     — every internal node is the binary EML primitive
-            ``eml(L, R) = exp(L) − ln(R)`` with ``⊥`` and ``1`` sentinels.
-            Mathematically faithful but visually deeper.
-            ``"expanded"`` — exp/ln/add/sub/scale primitives, not yet
-            collapsed to binary eml.
+        Every internal node of the returned tree is the binary primitive
+        ``eml(L, R) = exp(L) − ln(R)``.  Leaves are the real inputs
+        (variables, numeric constants, or ``0`` where one side of the eml
+        needs to vanish).  Pure-EML is the only meaningful representation
+        for the flow diagram — operator-level views aren't EML.
         """
         from eml_math.tree import parse_eml_tree
-        if mode == "pure":
-            return parse_eml_tree(self.eml, pure_eml=True)
-        if mode == "compact":
-            return parse_eml_tree(self.eml, expand_eml=False)
-        if mode == "expanded":
-            return parse_eml_tree(self.eml)
-        raise ValueError(f"unknown parse mode: {mode!r}")
+        return parse_eml_tree(self.eml, pure_eml=True)
 
     def evaluate(self, context: Dict[str, float]) -> float:
         """Evaluate against a parameter context. Convenience wrapper."""
         from eml_math.evaluator import EMLEvaluator
         return EMLEvaluator(context, strict=False).eval(self.eml)
 
-    def flow_svg(self, *, mode: str = "compact", **kw) -> str:
-        """Render the flow diagram as SVG; output label defaults to ``self.output``."""
+    def flow_svg(self, **kw) -> str:
+        """Render the pure-EML flow diagram as SVG (output label defaults to ``self.output``)."""
         kw.setdefault("output_label", self.output)
-        return self.parse(mode=mode).flow_svg(**kw)
+        return self.parse().flow_svg(**kw)
 
-    def flow_png(self, *, mode: str = "compact", **kw) -> bytes:
+    def flow_png(self, **kw) -> bytes:
         kw.setdefault("output_label", self.output)
-        return self.parse(mode=mode).flow_png(**kw)
+        return self.parse().flow_png(**kw)
 
-    def flow_pdf(self, *, mode: str = "compact", **kw) -> bytes:
+    def flow_pdf(self, **kw) -> bytes:
         kw.setdefault("output_label", self.output)
-        return self.parse(mode=mode).flow_pdf(**kw)
+        return self.parse().flow_pdf(**kw)
 
 
 # ── Registry ─────────────────────────────────────────────────────────────────

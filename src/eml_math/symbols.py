@@ -62,7 +62,7 @@ def _vec(label: str) -> EMLTreeNode:
     return EMLTreeNode(label=label, kind=NodeKind.VEC)
 
 def _bot() -> EMLTreeNode:
-    return EMLTreeNode(label="⊥", kind=NodeKind.BOTTOM)
+    return EMLTreeNode(label="0", kind=NodeKind.BOTTOM)
 
 def _eml(L: EMLTreeNode, R: EMLTreeNode) -> EMLTreeNode:
     return EMLTreeNode(

@@ -64,15 +64,28 @@ DEFAULT_PALETTE: Sequence[Tuple[int, int, int]] = (
     ( 79, 131,  33),  # olive
 )
 
-# Sentinel leaves get a neutral muted colour so they don't compete with
-# real-input colours visually.
-SENTINEL_COLOR: Tuple[int, int, int] = (160, 160, 160)
-# Only the bottom (exp(⊥)=0) is treated as a sentinel — it's a pure-EML
-# internal artefact with no semantic meaning to a human reader. The number
-# 1 is a real numeric input (it just happens to be ln(1)=0 in EML), so it
-# gets a normal palette colour and participates in merging just like any
-# other constant.
-SENTINEL_LABELS = frozenset({"⊥"})
+# Every leaf in the EML graph is a real input — there are no sentinels.
+# Variables (a, M, …) and arbitrary numeric constants (2, 4, 0.5, …) get
+# palette colours via the equal-labels-same-colour rule.
+#
+# The two special constants 0 and 1 are *always* drawn as a short stub at
+# the leaf's branch endpoint with the number written right there — they
+# don't go all the way up to the top input row. Their colours are fixed:
+#   0 → pure black
+#   1 → pure white  (the branch is effectively invisible on a white
+#                    canvas, indicating ln(1)=0 contributes nothing)
+SENTINEL_COLOR: Tuple[int, int, int] = (160, 160, 160)   # legacy export, unused
+SENTINEL_LABELS: frozenset = frozenset()
+FIXED_COLORS: dict = {
+    "0": (140, 140, 140),   # default: medium grey (override per call to taste)
+    "1": (200, 200, 200),   # default: light grey
+}
+# Label-text colour overrides for the FIXED_COLORS entries — used when the
+# branch colour is too pale to read as text.
+FIXED_LABEL_COLORS: dict = {
+    "0": (60,  60,  60),
+    "1": (60,  60,  60),
+}
 
 
 # ── Internal layout state attached to nodes ──────────────────────────────────
@@ -240,6 +253,64 @@ def _to_pure_eml_tree(node: "EMLTreeNode") -> "EMLTreeNode":
     return _to_pure_eml(node)
 
 
+def _stub_inline_leaves(
+    node: "EMLTreeNode",
+    *,
+    direction: str,
+    fixed_labels,           # iterable of labels that should become stubs
+    inline_constants: bool,
+    label_font_size: int,
+) -> None:
+    """Reposition inline-constant leaves so they sit *next to* their parent
+    junction as a short stub instead of extending all the way up to the
+    leaf row. Operates after :func:`_to_screen` has set _fx/_fy.
+
+    Direction → which axis the stub sits on:
+      down/up    : stub is offset along the cross (x) axis from the parent
+      right/left : stub is offset along the cross (y) axis
+    """
+    stub_set = set(fixed_labels)
+    if not stub_set and not inline_constants:
+        return
+
+    def _is_inline(leaf):
+        if leaf.label in stub_set:
+            return True
+        if inline_constants and _is_numeric_label(leaf.label):
+            return True
+        return False
+
+    # Distance from parent to stub leaf, in the same screen-units _to_screen used.
+    stub_offset = max(28.0, float(label_font_size) * 1.6)
+
+    def _walk(parent):
+        if not parent.children:
+            return
+        n = len(parent.children)
+        for i, child in enumerate(parent.children):
+            if not child.children and _is_inline(child):
+                # Cross-axis offset: spread children evenly around parent.
+                # For binary parent: L-child gets -ve offset, R-child +ve.
+                t = (i / (n - 1) - 0.5) if n > 1 else 0.0
+                cross_off = t * 2 * stub_offset    # left-of-parent for L, right for R
+                primary_off = stub_offset * 0.6   # short way back along the primary axis
+                if direction == "down":
+                    child._fx = parent._fx + cross_off
+                    child._fy = parent._fy - primary_off
+                elif direction == "up":
+                    child._fx = parent._fx + cross_off
+                    child._fy = parent._fy + primary_off
+                elif direction == "right":
+                    child._fx = parent._fx - primary_off
+                    child._fy = parent._fy + cross_off
+                else:  # left
+                    child._fx = parent._fx + primary_off
+                    child._fy = parent._fy + cross_off
+            _walk(child)
+
+    _walk(node)
+
+
 def _expand_symbols_in_tree(node: "EMLTreeNode") -> "EMLTreeNode":
     """Recursively replace any leaf whose label is a known named symbol with
     its EML construction tree (from :mod:`eml_math.symbols`)."""
@@ -270,6 +341,7 @@ def _layout(
     palette: Sequence[Tuple[int, int, int]],
     direction: str,
     expand_symbols: bool,
+    fixed_colors: Optional[dict] = None,
 ) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
     """Returns (binarised_root, leaves_in_cross-axis-order)."""
     if expand_symbols:
@@ -293,14 +365,14 @@ def _layout(
         margin_cross=margin_cross,
     )
 
-    # Colour assignment: equal labels share a colour. Sentinel leaves
-    # (⊥, 1) get a single neutral grey so they fade into the background
-    # next to the real-input colours.
+    # Colour assignment: equal labels share a colour. Fixed-colour labels
+    # (e.g. 0 and 1) are pinned by the caller-supplied (or default) map.
+    fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     label_to_color: dict[str, Tuple[int, int, int]] = {}
     next_palette_idx = 0
     for leaf in leaves:
-        if leaf.label in SENTINEL_LABELS:
-            label_to_color.setdefault(leaf.label, SENTINEL_COLOR)
+        if leaf.label in fc:
+            label_to_color.setdefault(leaf.label, tuple(fc[leaf.label]))
             continue
         if leaf.label not in label_to_color:
             label_to_color[leaf.label] = tuple(palette[next_palette_idx % len(palette)])
@@ -323,7 +395,10 @@ def flow_svg(
     output_label = "Out",                    # str | Sequence[str] for multi-output
     expand_symbols: bool = False,
     merge_inputs: bool = False,              # deduplicate identical inputs into one
-    show_sentinel_labels: bool = False,      # show ⊥ / 1 sentinel labels on leaves
+    inline_constants: bool = False,          # numeric leaves render at their branch endpoint
+    fixed_colors: Optional[dict] = None,     # override colours for special labels (0, 1, …)
+    fixed_label_colors: Optional[dict] = None,
+    show_sentinel_labels: bool = False,      # legacy, no-op (every leaf is a real input)
     label_font_size: int = 18,
     output_font_size: int = 22,
     edge_width: float = 3.0,
@@ -379,6 +454,14 @@ def flow_svg(
     primary_output_size = float(output_font_size) * 2.0 if show_output_label else 30.0
     if multi_output:
         primary_output_size *= 1.6   # extra room for multiple labels
+    # When merging, push the leaves further into the canvas so the merged
+    # input labels at the very lead-end have vertical room to slerp down
+    # to each usage point in the tree.
+    if merge_inputs:
+        primary_label_size *= 3.0
+
+    fc = FIXED_COLORS if fixed_colors is None else fixed_colors
+    flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors
 
     node, leaves = _layout(
         node,
@@ -388,7 +471,14 @@ def flow_svg(
         margin_cross=cross_margin,
         palette=palette, direction=direction,
         expand_symbols=expand_symbols,
+        fixed_colors=fc,
     )
+
+    # Reposition 0/1 (and other inline) leaves to sit RIGHT NEXT TO their
+    # parent junction so they don't draw long branches all the way up.
+    _stub_inline_leaves(node, direction=direction, fixed_labels=fc.keys(),
+                         inline_constants=inline_constants,
+                         label_font_size=label_font_size)
 
     parts: List[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -411,64 +501,101 @@ def flow_svg(
     # ── junction dots ───────────────────────────────────────────────────────
     _emit_junctions(node, parts, junction_radius)
 
+    # ── inline constants — render at the branch endpoint, not at the lead end ──
+    # Two cases trigger inline rendering:
+    #   * `inline_constants=True` and the leaf parses as any number  (2, 4, 0.5 …)
+    #   * the leaf is `0` or `1` — these are *always* short stubs with fixed
+    #     colours (black / white), regardless of `inline_constants`. Variables
+    #     and other constants still go to the top input row.
+    inline_leaves = []
+    for l in leaves:
+        if l.label in fc:
+            inline_leaves.append(l)
+        elif inline_constants and _is_numeric_label(l.label):
+            inline_leaves.append(l)
+    inline_leaf_set = {id(l) for l in inline_leaves}
+
+    for leaf in inline_leaves:
+        # Use the fixed-label colour where given (so a near-white '1' stays
+        # readable), otherwise the branch colour.
+        text_col = _rgb_hex(flc.get(leaf.label, leaf._fcolor))
+        if direction == "down":
+            tx, ty = leaf._fx, leaf._fy - 4
+            anchor = "middle"
+        elif direction == "up":
+            tx, ty = leaf._fx, leaf._fy + label_font_size
+            anchor = "middle"
+        elif direction == "right":
+            tx, ty = leaf._fx + 4, leaf._fy + label_font_size * 0.35
+            anchor = "start"
+        else:  # left
+            tx, ty = leaf._fx - 4, leaf._fy + label_font_size * 0.35
+            anchor = "end"
+        parts.append(
+            f'<text x="{tx:.1f}" y="{ty:.1f}" fill="{text_col}" text-anchor="{anchor}" '
+            f'font-weight="700" font-size="{label_font_size}">{_esc(leaf.label)}</text>'
+        )
+
     # ── input labels at the LEAD end ────────────────────────────────────────
+    # Skip leaves that have already been drawn inline.
+    leaves_for_top = [l for l in leaves if id(l) not in inline_leaf_set]
     if merge_inputs:
         # Group leaves by label; render ONE label per unique input and draw
         # 1-to-N redirector curves from the merged-input position to each
         # usage point (the leaf's screen position in the tree).
+        # Inline constants are excluded from the top labels.
         unique_labels: List[str] = []
-        for leaf in leaves:
+        for leaf in leaves_for_top:
             if leaf.label not in unique_labels:
                 unique_labels.append(leaf.label)
         n_uniq = len(unique_labels)
 
         merged_pos: dict[str, Tuple[float, float]] = {}
-        # Place the merged inputs evenly along the cross axis at the lead end.
+        # Place the merged inputs at the very edge of the canvas — well
+        # ahead of where the leaves sit (which got pushed inward by the 3×
+        # margin bump) so the redirector curves have room to slerp.
+        merged_offset = label_font_size * 1.6   # distance from the canvas edge
         for i, lbl in enumerate(unique_labels):
             cross_t = 0.5 if n_uniq == 1 else i / (n_uniq - 1)
-            if direction in ("down", "up"):
+            if direction == "down":
                 mx = cross_margin + cross_t * (width - 2 * cross_margin)
-                my = primary_label_size if direction == "down" else height - primary_label_size
-            else:
+                my = merged_offset
+            elif direction == "up":
+                mx = cross_margin + cross_t * (width - 2 * cross_margin)
+                my = height - merged_offset
+            elif direction == "right":
                 my = cross_margin + cross_t * (height - 2 * cross_margin)
-                mx = primary_label_size if direction == "right" else width - primary_label_size
+                mx = merged_offset
+            else:  # left
+                my = cross_margin + cross_t * (height - 2 * cross_margin)
+                mx = width - merged_offset
             merged_pos[lbl] = (mx, my)
 
         # Redirector curves: from each merged-input position to every leaf's tree position.
-        for leaf in leaves:
+        for leaf in leaves_for_top:
             mx, my = merged_pos[leaf.label]
             col = _rgb_hex(leaf._fcolor)
             parts.append(_curve_d(mx, my, leaf._fx, leaf._fy, direction, col, edge_width))
 
-        # Render one label per unique input (skip sentinels unless asked)
+        # Render one label per unique input — every leaf is a real input.
+        label_color = {l: c for l, c in _label_colors_iter(leaves_for_top)}
         for lbl in unique_labels:
-            is_sentinel = lbl in SENTINEL_LABELS
-            if is_sentinel and not show_sentinel_labels:
-                continue
             mx, my = merged_pos[lbl]
-            col = _rgb_hex(SENTINEL_COLOR if is_sentinel
-                           else next(iter(c for l, c in _label_colors_iter(leaves) if l == lbl)))
+            col = _rgb_hex(label_color[lbl])
             lx, ly = _label_offset(mx, my, direction, label_font_size, "lead")
             anchor = _text_anchor(direction, "lead")
-            fs     = int(label_font_size * 0.7) if is_sentinel else label_font_size
-            weight = "400" if is_sentinel else "700"
             parts.append(
                 f'<text x="{lx:.1f}" y="{ly:.1f}" fill="{col}" text-anchor="{anchor}" '
-                f'font-weight="{weight}" font-size="{fs}">{_esc(lbl)}</text>'
+                f'font-weight="700" font-size="{label_font_size}">{_esc(lbl)}</text>'
             )
     else:
-        for leaf in leaves:
-            is_sentinel = leaf.label in SENTINEL_LABELS
-            if is_sentinel and not show_sentinel_labels:
-                continue   # tiny grey dot is enough — see _emit_junctions
+        for leaf in leaves_for_top:
             col = _rgb_hex(leaf._fcolor)
             lx, ly = _label_offset(leaf._fx, leaf._fy, direction, label_font_size, "lead")
             anchor = _text_anchor(direction, "lead")
-            fs     = int(label_font_size * 0.7) if is_sentinel else label_font_size
-            weight = "400" if is_sentinel else "700"
             parts.append(
                 f'<text x="{lx:.1f}" y="{ly:.1f}" fill="{col}" text-anchor="{anchor}" '
-                f'font-weight="{weight}" font-size="{fs}">{_esc(leaf.label)}</text>'
+                f'font-weight="700" font-size="{label_font_size}">{_esc(leaf.label)}</text>'
             )
 
     # ── output label(s) at the TRAIL end ────────────────────────────────────
@@ -551,6 +678,15 @@ def _multi_output_position(out_x: float, out_y: float, direction: str,
     if direction in ("down", "up"):
         return (out_x + offset, out_y)
     return (out_x, out_y + offset)
+
+
+def _is_numeric_label(label: str) -> bool:
+    """True if *label* parses as a finite real number (e.g. '1', '-2.5', '0.5')."""
+    try:
+        float(label)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def _label_colors_iter(leaves):
@@ -735,6 +871,9 @@ def _flow_png_pillow(
     output_label = "Out",
     expand_symbols: bool = False,
     merge_inputs: bool = False,
+    inline_constants: bool = False,
+    fixed_colors: Optional[dict] = None,
+    fixed_label_colors: Optional[dict] = None,
     show_sentinel_labels: bool = False,
     label_font_size: int = 18,
     output_font_size: int = 22,
@@ -770,12 +909,17 @@ def _flow_png_pillow(
     primary_output_size = float(output_font_size) * 2.0 if show_output_label else 30.0
     if multi_output:
         primary_output_size *= 1.6
+    if merge_inputs:
+        primary_label_size *= 3.0   # room above leaves for slerp from merged inputs
 
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
     half_label_w   = 0.5 * 0.6 * label_font_size * max_label_len
     cross_margin   = max(40.0, half_label_w + 12.0)
+
+    fc = FIXED_COLORS if fixed_colors is None else fixed_colors
+    flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors
 
     node, leaves = _layout(
         node,
@@ -785,7 +929,12 @@ def _flow_png_pillow(
         margin_cross=cross_margin,
         palette=palette, direction=direction,
         expand_symbols=expand_symbols,
+        fixed_colors=fc,
     )
+
+    _stub_inline_leaves(node, direction=direction, fixed_labels=fc.keys(),
+                         inline_constants=inline_constants,
+                         label_font_size=label_font_size)
 
     img = Image.new("RGB", (W, H), background)
     draw = ImageDraw.Draw(img)
@@ -863,11 +1012,39 @@ def _flow_png_pillow(
             tx = lx_screen + pad; ty = ly_screen - th / 2
         draw.text((tx, ty), label_text, fill=color_rgb, font=font_label)
 
+    # Inline pass: 0 and 1 (or whatever fixed_colors keys you passed) are
+    # *always* drawn as short stubs at their branch endpoints. Other
+    # numeric leaves only become inline when inline_constants=True.
+    inline_constant_leaves = []
+    for l in leaves:
+        if l.label in fc:
+            inline_constant_leaves.append(l)
+        elif inline_constants and _is_numeric_label(l.label):
+            inline_constant_leaves.append(l)
+    inline_constant_set = {id(l) for l in inline_constant_leaves}
+
+    for leaf in inline_constant_leaves:
+        text_rgb = tuple(int(round(v)) for v in flc.get(leaf.label, leaf._fcolor))
+        bbox = draw.textbbox((0, 0), leaf.label, font=font_label)
+        tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
+        lx = leaf._fx * scale; ly = leaf._fy * scale
+        if direction == "down":
+            tx = lx - tw / 2;        ty = ly - th - 2 * scale
+        elif direction == "up":
+            tx = lx - tw / 2;        ty = ly + 2 * scale
+        elif direction == "right":
+            tx = lx + 4 * scale;     ty = ly - th / 2
+        else:  # left
+            tx = lx - tw - 4 * scale; ty = ly - th / 2
+        draw.text((tx, ty), leaf.label, fill=text_rgb, font=font_label)
+
+    leaves_for_top = [l for l in leaves if id(l) not in inline_constant_set]
+
     if merge_inputs:
         # One input position per unique leaf label; redirector curves from
         # the merged position to every usage point in the tree.
         unique_labels = []
-        for l in leaves:
+        for l in leaves_for_top:
             if l.label not in unique_labels:
                 unique_labels.append(l.label)
         n_uniq = len(unique_labels)
@@ -884,28 +1061,22 @@ def _flow_png_pillow(
                 mx = primary_label_size if direction == "right" else width - primary_label_size
             merged_pos[lbl] = (mx, my)
 
-        # Redirector curves
-        for leaf in leaves:
+        # Redirector curves (inline constants already drawn at their endpoints)
+        for leaf in leaves_for_top:
             mx, my = merged_pos[leaf.label]
             col = tuple(int(round(v)) for v in leaf._fcolor)
             pts = _curve_pts_for_pil(mx, my, leaf._fx, leaf._fy)
             draw.line(pts, fill=col, width=ew, joint="curve")
 
-        # One label per unique input
+        # One label per unique input — every leaf is a real input.
         label_color = {}
-        for lbl, c in _label_colors_iter(leaves):
+        for lbl, c in _label_colors_iter(leaves_for_top):
             label_color[lbl] = tuple(int(round(v)) for v in c)
         for lbl in unique_labels:
-            is_sentinel = lbl in SENTINEL_LABELS
-            if is_sentinel and not show_sentinel_labels:
-                continue
             mx, my = merged_pos[lbl]
             _draw_leaf_label(lbl, label_color[lbl], mx * scale, my * scale)
     else:
-        for leaf in leaves:
-            is_sentinel = leaf.label in SENTINEL_LABELS
-            if is_sentinel and not show_sentinel_labels:
-                continue
+        for leaf in leaves_for_top:
             col = tuple(int(round(v)) for v in leaf._fcolor)
             _draw_leaf_label(leaf.label, col, leaf._fx * scale, leaf._fy * scale)
 
