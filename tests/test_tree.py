@@ -14,6 +14,10 @@ from eml_math.tree import (
     NodeKind,
     EML_EXPANSIONS,
     parse_eml_tree,
+    to_compact,
+    from_compact,
+    KIND_CHAR,
+    CHAR_KIND,
 )
 
 
@@ -309,6 +313,63 @@ class TestSVG:
         svg = parse_eml_tree(desc).svg()
         assert "</svg>" in svg
         assert svg.count("<rect") >= 5
+
+
+# ---------------------------------------------------------------------------
+# Compact serialization (to_compact / from_compact)
+# ---------------------------------------------------------------------------
+
+class TestCompactSerialization:
+    def test_kind_maps_are_inverse(self):
+        for k, v in KIND_CHAR.items():
+            assert CHAR_KIND[v] == k
+
+    def test_leaf_compact(self):
+        n = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        assert to_compact(n) == ["x", "v"]
+
+    def test_internal_compact(self):
+        a = EMLTreeNode(label="a", kind=NodeKind.VEC)
+        b = EMLTreeNode(label="b", kind=NodeKind.VEC)
+        n = EMLTreeNode(label="mul", kind=NodeKind.COMPOUND, children=[a, b])
+        assert to_compact(n) == ["mul", "c", ["a", "v"], ["b", "v"]]
+
+    def test_round_trip_leaf(self):
+        n = EMLTreeNode(label="42", kind=NodeKind.SCALAR)
+        n2 = from_compact(to_compact(n))
+        assert n2.label == "42"
+        assert n2.kind == NodeKind.SCALAR
+
+    def test_round_trip_internal(self):
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))", expand_eml=False)
+        arr = to_compact(t)
+        t2 = from_compact(arr)
+        assert t2.label == t.label
+        assert t2.kind == t.kind
+        assert len(t2.children) == 2
+
+    def test_method_aliases(self):
+        n = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        assert n.to_compact() == ["x", "v"]
+        n2 = EMLTreeNode.from_compact(["x", "v"])
+        assert n2.label == "x"
+
+    def test_nested_round_trip(self):
+        # 7-deep pure-eml tree
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        arr = to_compact(t)
+        t2 = from_compact(arr)
+        # tree depth should match
+        def depth(n):
+            return 0 if not n.children else 1 + max(depth(c) for c in n.children)
+        assert depth(t) == depth(t2)
+
+    def test_compact_size_smaller_than_dict(self):
+        import json
+        t = parse_eml_tree("EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True)
+        compact_size = len(json.dumps(to_compact(t)))
+        dict_size    = len(json.dumps(t.to_dict()))
+        assert compact_size < dict_size  # always smaller
 
 
 # ---------------------------------------------------------------------------

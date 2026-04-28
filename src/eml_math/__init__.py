@@ -127,8 +127,13 @@ from eml_math.e7_56 import E7_56
 from eml_math.e8_248 import E8_248, E8xE8
 from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
 from eml_math.operators import eml_scalar, eml_pi, eml_vec
-from eml_math.tree import EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree
+from eml_math.tree import (
+    EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree,
+    to_compact, from_compact, KIND_CHAR, CHAR_KIND,
+)
 from eml_math.flow import flow_svg, flow_html, flow_png, DEFAULT_PALETTE
+from eml_math.symbols import Symbol, SYMBOLS, lookup, construct, register
+from eml_math.web import get_flow_js, FLOW_JS_PATH
 
 iterate = simulate_pulses
 
@@ -203,4 +208,18 @@ __all__ = [
     "flow_html",
     "flow_png",
     "DEFAULT_PALETTE",
+    # Compact tree serialisation (JSON-friendly array form)
+    "to_compact",
+    "from_compact",
+    "KIND_CHAR",
+    "CHAR_KIND",
+    # Named symbol library (e, π, φ, √2, …)
+    "Symbol",
+    "SYMBOLS",
+    "lookup",
+    "construct",
+    "register",
+    # Browser-side renderer (UMD JS file shipped with the package)
+    "get_flow_js",
+    "FLOW_JS_PATH",
 ]

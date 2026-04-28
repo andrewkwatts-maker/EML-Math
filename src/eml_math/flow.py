@@ -70,6 +70,40 @@ def _collect_leaves(node: "EMLTreeNode") -> List["EMLTreeNode"]:
     return out
 
 
+def _binarize(node: "EMLTreeNode") -> "EMLTreeNode":
+    """Pre-process tree for flow rendering: every internal node ends up binary.
+
+    Rules
+    -----
+    * Leaf — pass through unchanged.
+    * Unary internal — skip the node entirely; the child becomes the result.
+      This eliminates "1 → 1" junction artefacts from operators like sqrt,
+      sin, exp, ln, neg.
+    * Binary internal — keep as-is.
+    * N-ary internal (N>2) — left-fold into nested binary so the diagram
+      shows N−1 binary joins instead of an N-into-1 merge. So
+      ``std(a, b, c)`` renders as ``[[a, b], c]``.
+    """
+    # imported lazily to avoid the circular import at module load time
+    from eml_math.tree import EMLTreeNode
+
+    if not node.children:
+        return node
+
+    cc = [_binarize(c) for c in node.children]
+    if len(cc) == 1:
+        return cc[0]   # collapse unary
+    if len(cc) == 2:
+        return EMLTreeNode(label=node.label, kind=node.kind, children=cc,
+                           eml_form=node.eml_form)
+    # n-ary → left-fold
+    folded = cc[0]
+    for c in cc[1:]:
+        folded = EMLTreeNode(label=node.label, kind=node.kind,
+                             children=[folded, c], eml_form=node.eml_form)
+    return folded
+
+
 def _height(node: "EMLTreeNode") -> int:
     """Tree height: leaves are 0, root is the maximum."""
     if not node.children:
@@ -138,7 +172,13 @@ def _layout(
     margin_bottom: float,
     margin_lr: float,
     palette: Sequence[Tuple[int, int, int]],
-) -> List["EMLTreeNode"]:
+) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
+    """Returns (binarised_root, leaves_left_to_right)."""
+    # Always binarise first — guarantees every internal node has 2 children
+    # so the flow diagram is a true binary tree. Unaries collapse, n-aries
+    # left-fold.
+    node = _binarize(node)
+
     leaves = _collect_leaves(node)
     n = len(leaves)
     # x-positions for leaves: evenly spaced
@@ -150,7 +190,7 @@ def _layout(
             id(l): margin_lr + usable * i / (n - 1)
             for i, l in enumerate(leaves)
         }
-    # vertical layer spacing
+    # vertical layer spacing — always span the full canvas regardless of depth
     h = max(_height(node), 1)
     layer_h = (height - margin_top - margin_bottom) / h
     _assign_xy(node, leaf_x, margin_top, layer_h)
@@ -159,7 +199,7 @@ def _layout(
         id(l): tuple(palette[i % len(palette)]) for i, l in enumerate(leaves)
     }
     _assign_colors(node, leaf_color)
-    return leaves
+    return node, leaves
 
 
 # ── SVG renderer ─────────────────────────────────────────────────────────────
@@ -210,12 +250,12 @@ def flow_svg(
     # Margin must accommodate half the widest leaf label so the leftmost /
     # rightmost text doesn't run off the canvas. Approximate width as
     # 0.6 * font_size per character (decent for proportional fonts).
-    leaves_preview = _collect_leaves(node)
+    leaves_preview = _collect_leaves(_binarize(node))
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
     half_label_w   = 0.5 * 0.6 * label_font_size * max_label_len
     margin_lr      = max(40.0, half_label_w + 12.0)
 
-    leaves = _layout(
+    node, leaves = _layout(
         node,
         width=width, height=height,
         margin_top=margin_top, margin_bottom=margin_bottom, margin_lr=margin_lr,
@@ -232,6 +272,19 @@ def flow_svg(
 
     # ── edges (drawn first so junctions/labels sit on top) ──────────────────
     _emit_flow_edges(node, parts, edge_width)
+
+    # ── if the binarised tree is a bare leaf (e.g. exp(neg(x)) collapsed
+    #    all unaries away), draw a direct line from the leaf to the output
+    #    position so the diagram still shows a connection.
+    output_y = height - margin_bottom
+    if not node.children:
+        col = _rgb_hex(node._fcolor)
+        my = (node._fy + output_y) / 2
+        parts.append(
+            f'<path d="M{node._fx:.1f},{node._fy:.1f} '
+            f'C{node._fx:.1f},{my:.1f} {width/2:.1f},{my:.1f} {width/2:.1f},{output_y:.1f}" '
+            f'stroke="{col}" stroke-width="{edge_width}" fill="none" stroke-linecap="round"/>'
+        )
 
     # ── junction dots at every internal node ────────────────────────────────
     _emit_junctions(node, parts, junction_radius)
@@ -423,12 +476,12 @@ def _flow_png_pillow(
 
     margin_top    = float(label_font_size) * 2.2
     margin_bottom = float(output_font_size) * 2.0 if show_output_label else 30.0
-    leaves_preview = _collect_leaves(node)
+    leaves_preview = _collect_leaves(_binarize(node))
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
     half_label_w   = 0.5 * 0.6 * label_font_size * max_label_len
     margin_lr      = max(40.0, half_label_w + 12.0)
 
-    leaves = _layout(
+    node, leaves = _layout(
         node,
         width=width, height=height,
         margin_top=margin_top, margin_bottom=margin_bottom, margin_lr=margin_lr,
@@ -464,6 +517,19 @@ def _flow_png_pillow(
             draw.line(pts, fill=col, width=ew, joint="curve")
             _draw_edges(c)
     _draw_edges(node)
+
+    # If binarised tree is a bare leaf (all unaries collapsed), draw a
+    # synthetic edge from the leaf to where the output label sits.
+    if not node.children:
+        output_y = (height - margin_bottom) * scale
+        p0 = (node._fx * scale, node._fy * scale)
+        p3 = (W / 2, output_y)
+        my = (p0[1] + p3[1]) / 2
+        p1 = (p0[0], my)
+        p2 = (p3[0], my)
+        pts = _bezier_points(p0, p1, p2, p3, samples=40)
+        col = tuple(int(round(v)) for v in node._fcolor)
+        draw.line(pts, fill=col, width=ew, joint="curve")
 
     # Junction dots
     def _draw_junctions(n):

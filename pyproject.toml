@@ -79,6 +79,9 @@ python-source = "src"
 manifest-path = "rust/eml_core/Cargo.toml"
 module-name = "eml_math.eml_core"
 features = ["pyo3/extension-module"]
+include = [
+    "src/eml_math/web/eml_flow.js",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

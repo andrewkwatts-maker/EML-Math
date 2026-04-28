@@ -6,7 +6,7 @@ import pytest
 from eml_math.tree import parse_eml_tree, EMLTreeNode, NodeKind
 from eml_math.flow import (
     flow_svg, flow_html, flow_png, DEFAULT_PALETTE,
-    _collect_leaves, _height, _layout, _rgb_hex,
+    _collect_leaves, _height, _layout, _rgb_hex, _binarize,
 )
 
 
@@ -51,7 +51,7 @@ class TestLayoutHelpers:
         t = parse_eml_tree(
             "EML: ops.mul(eml_vec('a'), eml_vec('b'))", pure_eml=True
         )
-        leaves = _layout(
+        _, leaves = _layout(
             t, width=400, height=300, margin_top=40, margin_bottom=40,
             margin_lr=40, palette=DEFAULT_PALETTE,
         )
@@ -62,6 +62,60 @@ class TestLayoutHelpers:
             assert hasattr(l, "_fcolor")
             assert 0 <= l._fx <= 400
             assert 0 <= l._fy <= 300
+
+
+class TestBinarize:
+    """The flow renderer treats the diagram as a binary tree.
+    _binarize() collapses unary internals and left-folds n-ary."""
+
+    def test_leaf_unchanged(self):
+        n = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        assert _binarize(n) is n
+
+    def test_unary_collapses(self):
+        # exp(x) — the exp node should be skipped, leaving just the leaf x
+        leaf = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        unary = EMLTreeNode(label="exp", kind=NodeKind.PRIMITIVE, children=[leaf])
+        result = _binarize(unary)
+        assert result is leaf
+
+    def test_unary_chain_collapses(self):
+        # exp(neg(x)) — both unaries collapse, leaving just x
+        x = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        neg = EMLTreeNode(label="neg", kind=NodeKind.STRUCTURAL, children=[x])
+        exp = EMLTreeNode(label="exp", kind=NodeKind.PRIMITIVE, children=[neg])
+        assert _binarize(exp) is x
+
+    def test_binary_passthrough(self):
+        a = EMLTreeNode(label="a", kind=NodeKind.VEC)
+        b = EMLTreeNode(label="b", kind=NodeKind.VEC)
+        root = EMLTreeNode(label="mul", kind=NodeKind.COMPOUND, children=[a, b])
+        result = _binarize(root)
+        assert len(result.children) == 2
+
+    def test_nary_left_folds(self):
+        # std(a, b, c) → [[a, b], c] — N-1 binary joins
+        a = EMLTreeNode(label="a", kind=NodeKind.VEC)
+        b = EMLTreeNode(label="b", kind=NodeKind.VEC)
+        c = EMLTreeNode(label="c", kind=NodeKind.VEC)
+        root = EMLTreeNode(label="std", kind=NodeKind.COMPOUND, children=[a, b, c])
+        result = _binarize(root)
+        assert len(result.children) == 2
+        # left child should itself be a binary node containing a and b
+        left = result.children[0]
+        assert len(left.children) == 2
+        assert left.children[0].label == "a"
+        assert left.children[1].label == "b"
+        assert result.children[1].label == "c"
+
+    def test_unary_inside_binary_collapses(self):
+        # mul(sqrt(x), y) — sqrt collapses, mul becomes (x, y)
+        x = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        y = EMLTreeNode(label="y", kind=NodeKind.VEC)
+        sqrt = EMLTreeNode(label="sqrt", kind=NodeKind.COMPOUND, children=[x])
+        mul = EMLTreeNode(label="mul", kind=NodeKind.COMPOUND, children=[sqrt, y])
+        result = _binarize(mul)
+        assert [c.label for c in result.children] == ["x", "y"]
 
 
 class TestRgbHex:
@@ -164,11 +218,11 @@ class TestFlowSVG:
         a = EMLTreeNode(label="a", kind=NodeKind.VEC)
         b = EMLTreeNode(label="b", kind=NodeKind.VEC)
         root = EMLTreeNode(label="eml", kind=NodeKind.PRIMITIVE, children=[a, b])
-        leaves = _layout(root, width=200, height=200, margin_top=20,
-                         margin_bottom=20, margin_lr=20,
-                         palette=[(200, 0, 0), (0, 0, 200)])
+        binarised, leaves = _layout(root, width=200, height=200, margin_top=20,
+                                     margin_bottom=20, margin_lr=20,
+                                     palette=[(200, 0, 0), (0, 0, 200)])
         # root colour = average of (200,0,0) and (0,0,200) = (100,0,100)
-        assert root._fcolor == pytest.approx((100, 0, 100))
+        assert binarised._fcolor == pytest.approx((100, 0, 100))
 
 
 # ---------------------------------------------------------------------------
