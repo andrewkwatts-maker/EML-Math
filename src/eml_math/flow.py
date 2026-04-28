@@ -50,19 +50,46 @@ DIRECTIONS = ("down", "up", "right", "left")
 # Distinct, vivid hues that survive averaging without becoming muddy.
 
 DEFAULT_PALETTE: Sequence[Tuple[int, int, int]] = (
-    (231,  29,  54),  # red
-    ( 33, 196, 196),  # cyan
-    ( 31,  79, 231),  # blue
-    (231,  33, 177),  # magenta
-    ( 33, 196,  79),  # green
-    (231, 131,  33),  # orange
-    (131,  33, 231),  # purple
-    (131,  79,  33),  # brown
-    ( 33,  79, 131),  # navy
-    (196, 231,  33),  # lime
-    (196,  33, 131),  # rose
-    ( 79, 131,  33),  # olive
+    (242, 165, 152),   # soft coral
+    (152, 209, 219),   # soft sky
+    (175, 188, 232),   # soft periwinkle
+    (231, 184, 220),   # soft pink
+    (181, 220, 174),   # soft sage
+    (242, 207, 158),   # soft peach
+    (200, 178, 230),   # soft lilac
+    (216, 200, 168),   # soft sand
+    (165, 207, 207),   # soft mint
+    (236, 196, 178),   # soft apricot
 )
+def _pastel_for_label(label: str) -> Tuple[int, int, int]:
+    """Deterministic soft-pastel colour for a label (so equal labels still
+    share a colour even when we fall back past the end of the palette).
+    The hash is stable across runs — the same label always maps to the
+    same hue."""
+    import hashlib
+    h = int(hashlib.md5(label.encode("utf-8")).hexdigest()[:8], 16)
+    # HSL → RGB at S=0.45, L=0.78 yields a soft-pastel band.
+    hue = (h % 360) / 360.0
+    return _hsl_to_rgb(hue, 0.45, 0.78)
+
+
+def _hsl_to_rgb(h: float, s: float, l: float) -> Tuple[int, int, int]:
+    """h, s, l ∈ [0, 1].  Returns (r, g, b) ∈ [0, 255]."""
+    if s == 0:
+        v = int(round(l * 255))
+        return (v, v, v)
+    def _hue(p, q, t):
+        t %= 1.0
+        if t < 1/6: return p + (q - p) * 6 * t
+        if t < 1/2: return q
+        if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+        return p
+    q = l + s - l * s if l < 0.5 else l * (1 - s) + s
+    p = 2 * l - q
+    r = _hue(p, q, h + 1/3)
+    g = _hue(p, q, h)
+    b = _hue(p, q, h - 1/3)
+    return (int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
 
 # Every leaf in the EML graph is a real input — there are no sentinels.
 # Variables (a, M, …) and arbitrary numeric constants (2, 4, 0.5, …) get
@@ -77,14 +104,13 @@ DEFAULT_PALETTE: Sequence[Tuple[int, int, int]] = (
 SENTINEL_COLOR: Tuple[int, int, int] = (160, 160, 160)   # legacy export, unused
 SENTINEL_LABELS: frozenset = frozenset()
 FIXED_COLORS: dict = {
-    "0": (140, 140, 140),   # default: medium grey (override per call to taste)
-    "1": (200, 200, 200),   # default: light grey
+    "0": (0, 0, 0),     # default: black for L=0
+    "1": (0, 0, 0),     # default: black for R=1
 }
-# Label-text colour overrides for the FIXED_COLORS entries — used when the
-# branch colour is too pale to read as text.
+# Label-text colour overrides for the FIXED_COLORS entries.
 FIXED_LABEL_COLORS: dict = {
-    "0": (60,  60,  60),
-    "1": (60,  60,  60),
+    "0": (0, 0, 0),
+    "1": (0, 0, 0),
 }
 
 
@@ -379,6 +405,7 @@ def _layout(
     expand_symbols: bool,
     fixed_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,
+    random_palette: bool = False,
 ) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
     """Returns (binarised_root, leaves_in_cross-axis-order)."""
     if expand_symbols:
@@ -404,6 +431,10 @@ def _layout(
 
     # Colour assignment: equal labels share a colour. Fixed-colour labels
     # (e.g. 0 and 1) are pinned by the caller-supplied (or default) map.
+    # When `random_palette` is True, OR when the formula has more unique
+    # leaves than the palette has entries, fall back to a deterministic
+    # per-label pastel hash so every leaf still gets a colour AND equal
+    # labels still share one.
     fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     label_to_color: dict[str, Tuple[int, int, int]] = {}
     next_palette_idx = 0
@@ -411,8 +442,12 @@ def _layout(
         if leaf.label in fc:
             label_to_color.setdefault(leaf.label, tuple(fc[leaf.label]))
             continue
-        if leaf.label not in label_to_color:
-            label_to_color[leaf.label] = tuple(palette[next_palette_idx % len(palette)])
+        if leaf.label in label_to_color:
+            continue
+        if random_palette or next_palette_idx >= len(palette):
+            label_to_color[leaf.label] = _pastel_for_label(leaf.label)
+        else:
+            label_to_color[leaf.label] = tuple(palette[next_palette_idx])
             next_palette_idx += 1
     leaf_color = {id(l): label_to_color[l.label] for l in leaves}
     _assign_colors(node, leaf_color, bypass_identity=bypass_identity_blend)
@@ -436,7 +471,8 @@ def flow_svg(
     fixed_colors: Optional[dict] = None,     # override colours for special labels (0, 1, …)
     fixed_label_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,      # skip L=0 and R=1 from the colour blend
-    omit_identity_labels: bool = True,       # don't print the number for L=0 / R=1 — the grey stub implies it
+    omit_identity_labels: bool = True,       # don't print the number for L=0 / R=1 — the stub implies it
+    random_palette: bool = False,            # use a per-label random pastel instead of the ordered palette
     show_sentinel_labels: bool = False,      # legacy, no-op (every leaf is a real input)
     label_font_size: int = 18,
     output_font_size: int = 22,
@@ -497,10 +533,10 @@ def flow_svg(
     # input labels at the very lead-end have vertical room to slerp down
     # to each usage point in the tree.
     if merge_inputs:
-        # Big multiplier so the redirector curves from the merged-input
-        # row down to each leaf's tree position have real vertical room
-        # to slerp — without it they end up looking horizontal.
-        primary_label_size *= 5.5
+        # Push the leaf row down to ≥ 50% of canvas height so the redirector
+        # zone above it is at least half the canvas tall. A fixed multiplier
+        # of label_font_size doesn't scale with canvas size — this does.
+        primary_label_size = max(primary_label_size, height * 0.5)
 
     fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors
@@ -515,6 +551,7 @@ def flow_svg(
         expand_symbols=expand_symbols,
         fixed_colors=fc,
         bypass_identity_blend=bypass_identity_blend,
+        random_palette=random_palette,
     )
 
     # Reposition 0/1 (and other inline) leaves to sit RIGHT NEXT TO their
@@ -962,6 +999,7 @@ def _flow_png_pillow(
     fixed_label_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,
     omit_identity_labels: bool = True,
+    random_palette: bool = False,
     show_sentinel_labels: bool = False,
     label_font_size: int = 18,
     output_font_size: int = 22,
@@ -998,10 +1036,10 @@ def _flow_png_pillow(
     if multi_output:
         primary_output_size *= 1.6
     if merge_inputs:
-        # Big multiplier so the redirector curves from the merged-input
-        # row down to each leaf's tree position have real vertical room
-        # to slerp — without it they end up looking horizontal.
-        primary_label_size *= 5.5   # room above leaves for slerp from merged inputs
+        # Push the leaf row down to ≥ 50% of canvas height so the redirector
+        # zone above it is at least half the canvas tall. A fixed multiplier
+        # of label_font_size doesn't scale with canvas size — this does.
+        primary_label_size = max(primary_label_size, height * 0.5)   # room above leaves for slerp from merged inputs
 
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
@@ -1022,6 +1060,7 @@ def _flow_png_pillow(
         expand_symbols=expand_symbols,
         fixed_colors=fc,
         bypass_identity_blend=bypass_identity_blend,
+        random_palette=random_palette,
     )
 
     _stub_inline_leaves(node, direction=direction, fixed_labels=fc.keys(),

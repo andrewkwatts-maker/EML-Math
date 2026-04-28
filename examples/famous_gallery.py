@@ -32,19 +32,15 @@ def main() -> None:
     #   inline_constants   — numeric constants render at the branch endpoint
     #   expand_symbols     — named symbols (e, φ, √2, …) get expanded into
     #                         their EML constructions in the diagram
-    # Per variant: (suffix, render-kwargs, canvas-size).
-    # Merged variants get extra height so the redirector zone has room
-    # to slerp from the merged-input row down to each leaf.
+    # Variants kept lean: default (the cleanest one) plus _inline (numeric
+    # constants drawn at branch endpoints rather than at the top input row).
+    # Merged and expand_symbols variants were trialled but the default looks
+    # better; both stay available as flow_*() kwargs but aren't part of the
+    # gallery anymore.
     base = (720, 440)
-    tall = (720, 640)   # +200px vertical for redirector breathing room
     variants = [
-        ("",                       dict(),                                                  base),
-        ("_merged",                dict(merge_inputs=True),                                 tall),
-        ("_inline",                dict(inline_constants=True),                             base),
-        ("_inline_merged",         dict(inline_constants=True, merge_inputs=True),         tall),
-        ("_expanded",              dict(expand_symbols=True),                              base),
-        ("_expanded_merged",       dict(expand_symbols=True, merge_inputs=True),           tall),
-        ("_expanded_inline",       dict(expand_symbols=True, inline_constants=True),       base),
+        ("",        dict(),                          base),
+        ("_inline", dict(inline_constants=True),     base),
     ]
     for eq in eqs:
         for suffix, kw, (w, h) in variants:
