@@ -378,6 +378,55 @@ class TestEqualLabelsSameColor:
         # all three different
         assert len(set(cols)) == 3
 
+    def test_identity_children_bypass_color_blend(self):
+        """L=0 (exp leg vanishes) and R=1 (ln leg vanishes) should not
+        contribute to the parent junction's blended colour."""
+        from eml_math.tree import EMLTreeNode, NodeKind
+        from eml_math.flow import _layout, FIXED_COLORS, DEFAULT_PALETTE
+
+        # eml(x, 1) — R=1 is identity; node colour should equal x's colour.
+        x = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        one = EMLTreeNode(label="1", kind=NodeKind.SCALAR)
+        root = EMLTreeNode(label="eml", kind=NodeKind.PRIMITIVE, children=[x, one])
+        rt, _ = _layout(root, width=300, height=200, margin_lead=20,
+                        margin_trail=20, margin_cross=20,
+                        palette=[(255, 0, 0), (0, 0, 255)],
+                        direction="down", expand_symbols=False,
+                        bypass_identity_blend=True)
+        # x got palette[0] = (255, 0, 0); root colour should equal x's
+        assert rt._fcolor == pytest.approx((255, 0, 0))
+
+        # eml(0, y) — L=0 is identity; node colour should equal y's colour.
+        zero = EMLTreeNode(label="0", kind=NodeKind.BOTTOM)
+        y = EMLTreeNode(label="y", kind=NodeKind.VEC)
+        root2 = EMLTreeNode(label="eml", kind=NodeKind.PRIMITIVE, children=[zero, y])
+        rt2, _ = _layout(root2, width=300, height=200, margin_lead=20,
+                         margin_trail=20, margin_cross=20,
+                         palette=[(0, 200, 0)],   # only y picks one up
+                         direction="down", expand_symbols=False,
+                         bypass_identity_blend=True)
+        # y got palette[0] = (0, 200, 0); root colour should equal y's
+        assert rt2._fcolor == pytest.approx((0, 200, 0))
+
+    def test_blend_without_bypass_includes_identity(self):
+        """With bypass_identity_blend=False the L=0 / R=1 colours DO blend
+        into the parent (legacy behaviour)."""
+        from eml_math.tree import EMLTreeNode, NodeKind
+        from eml_math.flow import _layout
+
+        x = EMLTreeNode(label="x", kind=NodeKind.VEC)
+        one = EMLTreeNode(label="1", kind=NodeKind.SCALAR)
+        root = EMLTreeNode(label="eml", kind=NodeKind.PRIMITIVE, children=[x, one])
+        # Force palette where x gets red, then 1 picks up the FIXED grey.
+        from eml_math.flow import FIXED_COLORS
+        rt, _ = _layout(root, width=300, height=200, margin_lead=20,
+                        margin_trail=20, margin_cross=20,
+                        palette=[(255, 0, 0)],
+                        direction="down", expand_symbols=False,
+                        bypass_identity_blend=False)
+        # Average of x's red and 1's grey should NOT equal red.
+        assert rt._fcolor != pytest.approx((255, 0, 0))
+
     def test_all_leaves_get_real_palette_color(self):
         # No sentinels — every distinct label gets its own palette colour;
         # equal labels (including ⊥, 1) share that colour.

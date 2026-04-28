@@ -211,16 +211,52 @@ def _to_screen(
 def _assign_colors(
     node: "EMLTreeNode",
     leaf_color: dict,
+    *,
+    bypass_identity: bool = True,
 ) -> Tuple[float, float, float]:
+    """Recursively colour every node by averaging its children's colours.
+
+    When ``bypass_identity=True`` (the default), an `eml(L, R)` junction
+    excludes from the average:
+      * the L child if its label is ``"0"`` — because ``exp(0) = 0`` in
+        our pure-eml convention so the L leg contributes nothing to the
+        value, and shouldn't muddy the colour either;
+      * the R child if its label is ``"1"`` — because ``ln(1) = 0`` so
+        the R leg likewise vanishes.
+    The excluded child still gets coloured (its short-stub branch is
+    drawn) but doesn't blend up the tree.
+    """
     if not node.children:
         rgb = leaf_color[id(node)]
         node._fcolor = rgb
         return rgb
-    rgbs = [_assign_colors(c, leaf_color) for c in node.children]
+
+    child_rgbs = [_assign_colors(c, leaf_color, bypass_identity=bypass_identity)
+                  for c in node.children]
+
+    contributing = list(child_rgbs)
+    if bypass_identity and len(node.children) == 2:
+        L, R = node.children
+        # Drop L's colour if L is the bottom-sentinel '0' (exp leg vanishes).
+        # Drop R's colour if R is '1' (ln leg vanishes).
+        keep = []
+        for child, rgb, is_L in (
+            (L, child_rgbs[0], True),
+            (R, child_rgbs[1], False),
+        ):
+            label = (child.label or "")
+            if is_L and label == "0":
+                continue
+            if (not is_L) and label == "1":
+                continue
+            keep.append(rgb)
+        if keep:
+            contributing = keep
+
     avg = (
-        sum(c[0] for c in rgbs) / len(rgbs),
-        sum(c[1] for c in rgbs) / len(rgbs),
-        sum(c[2] for c in rgbs) / len(rgbs),
+        sum(c[0] for c in contributing) / len(contributing),
+        sum(c[1] for c in contributing) / len(contributing),
+        sum(c[2] for c in contributing) / len(contributing),
     )
     node._fcolor = avg
     return avg
@@ -342,6 +378,7 @@ def _layout(
     direction: str,
     expand_symbols: bool,
     fixed_colors: Optional[dict] = None,
+    bypass_identity_blend: bool = True,
 ) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
     """Returns (binarised_root, leaves_in_cross-axis-order)."""
     if expand_symbols:
@@ -378,7 +415,7 @@ def _layout(
             label_to_color[leaf.label] = tuple(palette[next_palette_idx % len(palette)])
             next_palette_idx += 1
     leaf_color = {id(l): label_to_color[l.label] for l in leaves}
-    _assign_colors(node, leaf_color)
+    _assign_colors(node, leaf_color, bypass_identity=bypass_identity_blend)
     return node, leaves
 
 
@@ -398,6 +435,8 @@ def flow_svg(
     inline_constants: bool = False,          # numeric leaves render at their branch endpoint
     fixed_colors: Optional[dict] = None,     # override colours for special labels (0, 1, …)
     fixed_label_colors: Optional[dict] = None,
+    bypass_identity_blend: bool = True,      # skip L=0 and R=1 from the colour blend
+    omit_identity_labels: bool = True,       # don't print the number for L=0 / R=1 — the grey stub implies it
     show_sentinel_labels: bool = False,      # legacy, no-op (every leaf is a real input)
     label_font_size: int = 18,
     output_font_size: int = 22,
@@ -458,7 +497,10 @@ def flow_svg(
     # input labels at the very lead-end have vertical room to slerp down
     # to each usage point in the tree.
     if merge_inputs:
-        primary_label_size *= 3.0
+        # Big multiplier so the redirector curves from the merged-input
+        # row down to each leaf's tree position have real vertical room
+        # to slerp — without it they end up looking horizontal.
+        primary_label_size *= 5.5
 
     fc = FIXED_COLORS if fixed_colors is None else fixed_colors
     flc = FIXED_LABEL_COLORS if fixed_label_colors is None else fixed_label_colors
@@ -472,6 +514,7 @@ def flow_svg(
         palette=palette, direction=direction,
         expand_symbols=expand_symbols,
         fixed_colors=fc,
+        bypass_identity_blend=bypass_identity_blend,
     )
 
     # Reposition 0/1 (and other inline) leaves to sit RIGHT NEXT TO their
@@ -503,11 +546,20 @@ def flow_svg(
 
     # ── inline constants — render at the branch endpoint, not at the lead end ──
     # Two cases trigger inline rendering:
-    #   * `inline_constants=True` and the leaf parses as any number  (2, 4, 0.5 …)
+    #   * `inline_constants=True` and the leaf parses as any number (2, 4, 0.5 …)
     #   * the leaf is `0` or `1` — these are *always* short stubs with fixed
-    #     colours (black / white), regardless of `inline_constants`. Variables
-    #     and other constants still go to the top input row.
+    #     colours (grey by default), regardless of `inline_constants`.
+    # When omit_identity_labels=True (default), the *number* is suppressed
+    # for L=0 and R=1 because their meaning is already inferable from the
+    # grey colour and the L/R position; only the short grey stub is drawn.
     inline_leaves = []
+    parent_of: dict = {}
+    def _track_parents(p):
+        for c in (p.children or []):
+            parent_of[id(c)] = p
+            _track_parents(c)
+    _track_parents(node)
+
     for l in leaves:
         if l.label in fc:
             inline_leaves.append(l)
@@ -515,7 +567,23 @@ def flow_svg(
             inline_leaves.append(l)
     inline_leaf_set = {id(l) for l in inline_leaves}
 
+    def _is_identity_position(leaf) -> bool:
+        """True if leaf is L=0 (exp leg vanishes) or R=1 (ln leg vanishes)
+        of its parent eml junction — those are the cases the grey stub
+        implies on its own without needing the number printed."""
+        p = parent_of.get(id(leaf))
+        if p is None or len(p.children) != 2:
+            return False
+        which = "L" if p.children[0] is leaf else "R" if p.children[1] is leaf else None
+        if which == "L" and leaf.label == "0":
+            return True
+        if which == "R" and leaf.label == "1":
+            return True
+        return False
+
     for leaf in inline_leaves:
+        if omit_identity_labels and _is_identity_position(leaf):
+            continue   # the grey stub alone communicates 0-on-L / 1-on-R
         # Use the fixed-label colour where given (so a near-white '1' stays
         # readable), otherwise the branch colour.
         text_col = _rgb_hex(flc.get(leaf.label, leaf._fcolor))
@@ -572,10 +640,13 @@ def flow_svg(
             merged_pos[lbl] = (mx, my)
 
         # Redirector curves: from each merged-input position to every leaf's tree position.
+        # Strong vertical bias (0.85) so the curves leave the merged-input
+        # row going firmly DOWN instead of flattening into long horizontal runs.
         for leaf in leaves_for_top:
             mx, my = merged_pos[leaf.label]
             col = _rgb_hex(leaf._fcolor)
-            parts.append(_curve_d(mx, my, leaf._fx, leaf._fy, direction, col, edge_width))
+            parts.append(_curve_d(mx, my, leaf._fx, leaf._fy, direction, col,
+                                   edge_width, vertical_bias=0.85))
 
         # Render one label per unique input — every leaf is a real input.
         label_color = {l: c for l, c in _label_colors_iter(leaves_for_top)}
@@ -700,15 +771,30 @@ def _label_colors_iter(leaves):
 
 
 def _curve_d(cx: float, cy: float, px: float, py: float, direction: str,
-             stroke: str, edge_width: float) -> str:
-    """Cubic-Bezier path string from (cx, cy) to (px, py).  Control points are
-    offset along the *primary* axis so the curve flows naturally."""
+             stroke: str, edge_width: float, *,
+             vertical_bias: float = 0.5) -> str:
+    """Cubic-Bezier path string from (cx, cy) to (px, py).
+
+    `vertical_bias` ∈ [0, 1] controls how far along the primary axis the
+    control points sit. 0.5 (the default) puts them at the midpoint —
+    smooth S-curve. Higher values push the control points closer to the
+    *opposite* endpoint along the primary axis, forcing the curve to
+    leave each endpoint more vertically before bending — useful for
+    merge-input redirector curves where horizontal travel >> vertical
+    and the default S-curve flattens out.
+    """
+    vertical_bias = max(0.05, min(0.95, vertical_bias))
     if direction in ("down", "up"):
-        m = (cy + py) / 2
-        d = f"M{cx:.1f},{cy:.1f} C{cx:.1f},{m:.1f} {px:.1f},{m:.1f} {px:.1f},{py:.1f}"
+        # Control y for child end and parent end.
+        c_ctrl_y = cy + (py - cy) * vertical_bias
+        p_ctrl_y = py - (py - cy) * vertical_bias
+        d = (f"M{cx:.1f},{cy:.1f} C{cx:.1f},{c_ctrl_y:.1f} "
+             f"{px:.1f},{p_ctrl_y:.1f} {px:.1f},{py:.1f}")
     else:  # right or left
-        m = (cx + px) / 2
-        d = f"M{cx:.1f},{cy:.1f} C{m:.1f},{cy:.1f} {m:.1f},{py:.1f} {px:.1f},{py:.1f}"
+        c_ctrl_x = cx + (px - cx) * vertical_bias
+        p_ctrl_x = px - (px - cx) * vertical_bias
+        d = (f"M{cx:.1f},{cy:.1f} C{c_ctrl_x:.1f},{cy:.1f} "
+             f"{p_ctrl_x:.1f},{py:.1f} {px:.1f},{py:.1f}")
     return (f'<path d="{d}" stroke="{stroke}" stroke-width="{edge_width}" '
             f'fill="none" stroke-linecap="round"/>')
 
@@ -874,6 +960,8 @@ def _flow_png_pillow(
     inline_constants: bool = False,
     fixed_colors: Optional[dict] = None,
     fixed_label_colors: Optional[dict] = None,
+    bypass_identity_blend: bool = True,
+    omit_identity_labels: bool = True,
     show_sentinel_labels: bool = False,
     label_font_size: int = 18,
     output_font_size: int = 22,
@@ -910,7 +998,10 @@ def _flow_png_pillow(
     if multi_output:
         primary_output_size *= 1.6
     if merge_inputs:
-        primary_label_size *= 3.0   # room above leaves for slerp from merged inputs
+        # Big multiplier so the redirector curves from the merged-input
+        # row down to each leaf's tree position have real vertical room
+        # to slerp — without it they end up looking horizontal.
+        primary_label_size *= 5.5   # room above leaves for slerp from merged inputs
 
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
@@ -930,6 +1021,7 @@ def _flow_png_pillow(
         palette=palette, direction=direction,
         expand_symbols=expand_symbols,
         fixed_colors=fc,
+        bypass_identity_blend=bypass_identity_blend,
     )
 
     _stub_inline_leaves(node, direction=direction, fixed_labels=fc.keys(),
@@ -950,15 +1042,18 @@ def _flow_png_pillow(
     font_label  = _try_font(fs_label)
     font_output = _try_font(fs_output)
 
-    def _curve_pts_for_pil(c_x, c_y, p_x, p_y):
+    def _curve_pts_for_pil(c_x, c_y, p_x, p_y, vertical_bias: float = 0.5):
+        vb = max(0.05, min(0.95, vertical_bias))
         p0 = (c_x * scale, c_y * scale)
         p3 = (p_x * scale, p_y * scale)
         if direction in ("down", "up"):
-            m = (p0[1] + p3[1]) / 2
-            p1 = (p0[0], m); p2 = (p3[0], m)
+            c_y_ctrl = p0[1] + (p3[1] - p0[1]) * vb
+            p_y_ctrl = p3[1] - (p3[1] - p0[1]) * vb
+            p1 = (p0[0], c_y_ctrl); p2 = (p3[0], p_y_ctrl)
         else:  # right or left
-            m = (p0[0] + p3[0]) / 2
-            p1 = (m, p0[1]); p2 = (m, p3[1])
+            c_x_ctrl = p0[0] + (p3[0] - p0[0]) * vb
+            p_x_ctrl = p3[0] - (p3[0] - p0[0]) * vb
+            p1 = (c_x_ctrl, p0[1]); p2 = (p_x_ctrl, p3[1])
         return _bezier_points(p0, p1, p2, p3, samples=40)
 
     # Edges
@@ -1016,6 +1111,13 @@ def _flow_png_pillow(
     # *always* drawn as short stubs at their branch endpoints. Other
     # numeric leaves only become inline when inline_constants=True.
     inline_constant_leaves = []
+    parent_of_pil: dict = {}
+    def _track_p(p):
+        for c in (p.children or []):
+            parent_of_pil[id(c)] = p
+            _track_p(c)
+    _track_p(node)
+
     for l in leaves:
         if l.label in fc:
             inline_constant_leaves.append(l)
@@ -1023,7 +1125,19 @@ def _flow_png_pillow(
             inline_constant_leaves.append(l)
     inline_constant_set = {id(l) for l in inline_constant_leaves}
 
+    def _is_identity_pos(leaf) -> bool:
+        p = parent_of_pil.get(id(leaf))
+        if p is None or len(p.children) != 2:
+            return False
+        if p.children[0] is leaf and leaf.label == "0":
+            return True
+        if p.children[1] is leaf and leaf.label == "1":
+            return True
+        return False
+
     for leaf in inline_constant_leaves:
+        if omit_identity_labels and _is_identity_pos(leaf):
+            continue
         text_rgb = tuple(int(round(v)) for v in flc.get(leaf.label, leaf._fcolor))
         bbox = draw.textbbox((0, 0), leaf.label, font=font_label)
         tw = bbox[2] - bbox[0]; th = bbox[3] - bbox[1]
@@ -1061,11 +1175,11 @@ def _flow_png_pillow(
                 mx = primary_label_size if direction == "right" else width - primary_label_size
             merged_pos[lbl] = (mx, my)
 
-        # Redirector curves (inline constants already drawn at their endpoints)
+        # Redirector curves (strong vertical bias so they don't look horizontal)
         for leaf in leaves_for_top:
             mx, my = merged_pos[leaf.label]
             col = tuple(int(round(v)) for v in leaf._fcolor)
-            pts = _curve_pts_for_pil(mx, my, leaf._fx, leaf._fy)
+            pts = _curve_pts_for_pil(mx, my, leaf._fx, leaf._fy, vertical_bias=0.85)
             draw.line(pts, fill=col, width=ew, joint="curve")
 
         # One label per unique input — every leaf is a real input.
