@@ -135,7 +135,8 @@ from eml_math.flow import flow_svg, flow_html, flow_png, flow_pdf, DEFAULT_PALET
 from eml_math.flow_layout import (
     to_layout, render_svg as render_layout_svg,
     render_png as render_layout_png, render_pdf as render_layout_pdf,
-    gentle_curves, tighten_base, spread_horizontal,
+    gentle_curves, flowing_sideways, tighten_base, spread_horizontal,
+    fit_to_canvas, organic_layout,
 )
 from eml_math.symbols import Symbol, SYMBOLS, lookup, construct, register
 from eml_math.famous import (
@@ -226,8 +227,11 @@ __all__ = [
     "render_layout_png",
     "render_layout_pdf",
     "gentle_curves",
+    "flowing_sideways",
     "tighten_base",
     "spread_horizontal",
+    "fit_to_canvas",
+    "organic_layout",
     # Famous-equations registry
     "FamousEquation",
     "FAMOUS",

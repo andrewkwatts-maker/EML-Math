@@ -65,8 +65,11 @@ __all__ = [
     "render_pdf",
     # Built-in post-processes
     "gentle_curves",
+    "flowing_sideways",
     "tighten_base",
     "spread_horizontal",
+    "fit_to_canvas",
+    "organic_layout",
 ]
 
 
@@ -194,11 +197,17 @@ def to_layout(
 
 # ── Built-in post-processes ─────────────────────────────────────────────────
 
-def gentle_curves(layout: Dict[str, Any], *, bend: float = 0.3) -> Dict[str, Any]:
-    """Reduce every edge's vertical_bias to *bend* (0..1).
+def gentle_curves(layout: Dict[str, Any], *, bend: float = 0.55) -> Dict[str, Any]:
+    """Set every edge's vertical_bias to *bend* (0..1) for flowing curves.
 
-    Default 0.3 keeps curves long and gentle. Lower values approach a
-    straight line; higher values produce more pronounced S-curves.
+    The cubic-Bezier control points sit *bend* of the way along the primary
+    axis from each endpoint, giving:
+        bend ≈ 0.5  — classic S-curve (default 0.55 here adds a touch of
+                      vertical lead-in / lead-out so curves *flow* rather
+                      than read as straight lines that meet at angles)
+        bend > 0.7  — strongly vertical lead-in/out, big lateral sweep
+        bend < 0.3  — near-straight line; can look angular at junctions
+
     Returns a new layout dict (does not mutate the input).
     """
     bend = max(0.05, min(0.95, float(bend)))
@@ -207,6 +216,45 @@ def gentle_curves(layout: Dict[str, Any], *, bend: float = 0.3) -> Dict[str, Any
         {**e, "vertical_bias": bend}
         for e in layout["edges"]
     ]
+    return out
+
+
+def flowing_sideways(layout: Dict[str, Any], *,
+                     amplitude: float = 0.35,
+                     bend: float = 0.55) -> Dict[str, Any]:
+    """Add a sideways bow to every edge so the diagram has organic sweep
+    instead of straight vertical chains.
+
+    For each edge, the cubic-Bezier control points are perturbed on the
+    cross axis by `amplitude × edge_length`, alternating sign by edge so
+    consecutive branches lean opposite directions (creates a snake-like
+    flow rather than all bending the same way).
+
+    `bend` sets the primary-axis component (same meaning as
+    `gentle_curves`).
+    """
+    bend = max(0.05, min(0.95, float(bend)))
+    amp  = max(-1.0, min(1.0, float(amplitude)))
+    direction = layout.get("direction", "down")
+    cross_is_x = direction in ("down", "up")
+
+    nodes_by_id = {n["id"]: n for n in layout["nodes"]}
+
+    out = _shallow_copy(layout)
+    new_edges = []
+    for i, e in enumerate(layout["edges"]):
+        c = nodes_by_id[e["from"]]
+        p = nodes_by_id[e["to"]]
+        # Edge length on primary axis.
+        if cross_is_x:
+            primary_len = abs(p["y"] - c["y"])
+        else:
+            primary_len = abs(p["x"] - c["x"])
+        side = (1.0 if (i % 2 == 0) else -1.0) * amp * primary_len
+        new_edges.append({**e,
+                          "vertical_bias": bend,
+                          "sideways_offset": side})
+    out["edges"] = new_edges
     return out
 
 
@@ -254,12 +302,12 @@ def tighten_base(layout: Dict[str, Any], *, by: float = 0.4) -> Dict[str, Any]:
     return out
 
 
-def spread_horizontal(layout: Dict[str, Any], *, factor: float = 1.3) -> Dict[str, Any]:
+def spread_horizontal(layout: Dict[str, Any], *, factor: float = 1.7) -> Dict[str, Any]:
     """Spread every node along the cross axis by *factor* about the centre.
 
-    factor=1.0 is a no-op; >1 spreads inputs out for more breathing room;
-    <1 compresses. The output canvas isn't resized — the caller may want
-    to bump width/height to match.
+    Default 1.7 — input chains separate visibly. The output canvas size
+    isn't changed, so values >>1 will push nodes off the edge unless you
+    also bump the canvas width/height.
     """
     direction = layout.get("direction", "down")
     cross_axis = "x" if direction in ("down", "up") else "y"
@@ -270,6 +318,144 @@ def spread_horizontal(layout: Dict[str, Any], *, factor: float = 1.3) -> Dict[st
     out["nodes"] = [
         {**n, cross_axis: centre + (n[cross_axis] - centre) * factor}
         for n in layout["nodes"]
+    ]
+    return out
+
+
+def organic_layout(layout: Dict[str, Any], *,
+                   branch_angle: float = 22.0,
+                   length_scale: float = 38.0,
+                   length_decay: float = 0.92,
+                   angle_decay: float  = 0.96,
+                   bend: float = 0.55) -> Dict[str, Any]:
+    """Re-place every node by *growing* the tree from the root outward,
+    branch by branch, like a real tree.
+
+    The root sits at the diagram's "trunk" position. From every junction
+    its two children are placed at ±``branch_angle`` from the parent's
+    growing direction. As we move away from the root the lengths and
+    angles decay so the tree fans gracefully outward without exploding.
+    `fit_to_canvas` is automatically applied at the end so the result
+    fills the canvas without cropping.
+
+    Parameters
+    ----------
+    branch_angle : degrees the L/R children separate from their parent's
+        growing direction at the root. Bigger angle = wider tree.
+    length_scale : pixel length of the root branch.
+    length_decay : factor by which child branches shrink (per generation).
+    angle_decay  : factor by which the branch angle narrows per
+        generation (so deep branches don't curl back on themselves).
+    bend         : edge vertical_bias (0..1) for the renderer; default
+        0.55 keeps branches gracefully curving rather than straight.
+    """
+    import math
+    branch_angle = max(2.0, min(80.0, float(branch_angle)))
+    length_scale = max(5.0, float(length_scale))
+    length_decay = max(0.4, min(1.05, float(length_decay)))
+    angle_decay  = max(0.5, min(1.05, float(angle_decay)))
+    bend         = max(0.05, min(0.95, float(bend)))
+
+    direction = layout.get("direction", "down")
+
+    # Build adjacency.
+    nodes_by_id = {n["id"]: dict(n) for n in layout["nodes"]}
+    children_of: Dict[str, List[str]] = {nid: [] for nid in nodes_by_id}
+    parent_of: Dict[str, Optional[str]] = {nid: None for nid in nodes_by_id}
+    for e in layout["edges"]:
+        children_of[e["to"]].append(e["from"])
+        parent_of[e["from"]] = e["to"]
+    root_id = next(nid for nid, p in parent_of.items() if p is None)
+
+    # Root sits in the middle of the trail-end of the canvas.
+    W = float(layout["width"])
+    H = float(layout["height"])
+    if direction == "down":
+        root_pos    = (W / 2.0, H * 0.85)
+        growing_dir = (0.0, -1.0)        # branches go upward
+    elif direction == "up":
+        root_pos    = (W / 2.0, H * 0.15)
+        growing_dir = (0.0, 1.0)
+    elif direction == "right":
+        root_pos    = (W * 0.85, H / 2.0)
+        growing_dir = (-1.0, 0.0)
+    else:  # left
+        root_pos    = (W * 0.15, H / 2.0)
+        growing_dir = (1.0, 0.0)
+
+    def _rot(v, deg):
+        a = math.radians(deg)
+        c, s = math.cos(a), math.sin(a)
+        return (v[0] * c - v[1] * s, v[0] * s + v[1] * c)
+
+    def _grow(nid, pos, gdir, depth):
+        n = nodes_by_id[nid]
+        n["x"], n["y"] = pos
+        kids = children_of[nid]
+        if not kids:
+            return
+        L = length_scale * (length_decay ** depth)
+        a = branch_angle * (angle_decay ** depth)
+        # children[0] = L (exp side), children[1] = R (ln side)
+        # Place L on the left, R on the right of the growing direction.
+        signs = (-1.0, +1.0)
+        for child_id, sign in zip(kids, signs):
+            child_dir = _rot(gdir, sign * a)
+            child_pos = (pos[0] + child_dir[0] * L,
+                         pos[1] + child_dir[1] * L)
+            _grow(child_id, child_pos, child_dir, depth + 1)
+
+    _grow(root_id, root_pos, growing_dir, 0)
+
+    out = _shallow_copy(layout)
+    out["nodes"] = list(nodes_by_id.values())
+    # Apply gentle bend to every edge so branches read as curves not lines.
+    out["edges"] = [{**e, "vertical_bias": bend} for e in layout["edges"]]
+    # Auto-fit so a wide tree never crops.
+    return fit_to_canvas(out, margin=40.0)
+
+
+def fit_to_canvas(layout: Dict[str, Any], *,
+                  margin: float = 30.0,
+                  preserve_aspect: bool = True) -> Dict[str, Any]:
+    """Scale & translate every node so the diagram fits cleanly inside the
+    canvas with a uniform `margin` on all sides.
+
+    Use this AS THE LAST STEP after any post-process that may have pushed
+    nodes off the canvas (spread_horizontal, flowing_sideways with large
+    amplitude, …). Also useful for tightening up a sparse diagram.
+
+    Output layout has the same width/height as the input — only node
+    coordinates change.
+    """
+    nodes = layout["nodes"]
+    if not nodes:
+        return _shallow_copy(layout)
+    xs = [n["x"] for n in nodes]
+    ys = [n["y"] for n in nodes]
+    minx, maxx = min(xs), max(xs)
+    miny, maxy = min(ys), max(ys)
+    src_w = max(maxx - minx, 1e-6)
+    src_h = max(maxy - miny, 1e-6)
+    dst_w = layout["width"]  - 2 * margin
+    dst_h = layout["height"] - 2 * margin
+    sx = dst_w / src_w
+    sy = dst_h / src_h
+    if preserve_aspect:
+        s = min(sx, sy)
+        sx = sy = s
+    # Centre the scaled bbox inside the canvas.
+    cx = layout["width"]  / 2.0
+    cy = layout["height"] / 2.0
+    src_cx = (minx + maxx) / 2.0
+    src_cy = (miny + maxy) / 2.0
+
+    out = _shallow_copy(layout)
+    out["nodes"] = [
+        {**n,
+         "x": cx + (n["x"] - src_cx) * sx,
+         "y": cy + (n["y"] - src_cy) * sy}
+        for n in nodes
     ]
     return out
 

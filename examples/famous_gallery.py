@@ -26,21 +26,31 @@ from eml_math.tree import to_compact
 from eml_math.web import get_flow_js
 from eml_math.flow_layout import (
     to_layout, render_png, render_pdf,
-    gentle_curves, tighten_base, spread_horizontal,
+    gentle_curves, flowing_sideways, tighten_base, spread_horizontal,
+    fit_to_canvas, organic_layout,
 )
 
 
-# ── Style definitions ────────────────────────────────────────────────────────
-# Each style is (folder_name, post-process callable)
-# post-process: layout_dict -> layout_dict
-# `None` for no post-process.
+# ── Style definitions ───────────────────────────────────────────────────────
+# Each style is (folder_name, post-process pipeline).
+# Every pipeline ends with fit_to_canvas so the result never crops.
+
+def _pipe(*fns):
+    def composed(L):
+        for fn in fns:
+            L = fn(L)
+        return L
+    return composed
 
 STYLES = {
-    "formal":       None,
-    "gentle":       lambda L: gentle_curves(L, bend=0.25),
-    "tightened":    lambda L: tighten_base(L, by=0.5),
-    "tree":         lambda L: spread_horizontal(L, factor=1.45),
-    "gentle_tight": lambda L: tighten_base(gentle_curves(L, bend=0.25), by=0.4),
+    "formal":   lambda L: fit_to_canvas(L),                                    # current default
+    "gentle":   _pipe(lambda L: gentle_curves(L, bend=0.55), fit_to_canvas),   # flowing curves
+    "tree":     _pipe(lambda L: spread_horizontal(L, factor=1.7), fit_to_canvas),
+    "organic":  _pipe(lambda L: organic_layout(L,
+                                               branch_angle=22.0,
+                                               length_scale=42.0)),
+    "flowing":  _pipe(lambda L: flowing_sideways(L, amplitude=0.25, bend=0.6),
+                      fit_to_canvas),
 }
 
 WIDTH, HEIGHT = 720, 440
