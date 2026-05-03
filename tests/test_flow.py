@@ -9,6 +9,18 @@ from eml_math.flow import (
     _collect_leaves, _height, _layout, _rgb_hex, _binarize,
 )
 
+# PNG/PDF rendering needs Pillow (optional). Skip those tests when absent.
+try:
+    import PIL  # noqa: F401
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+requires_pil = pytest.mark.skipif(
+    not _HAS_PIL,
+    reason="Pillow not installed — install eml-math[render-raster] for PNG/PDF",
+)
+
 
 # ---------------------------------------------------------------------------
 # Layout helpers
@@ -294,12 +306,14 @@ class TestDirection:
         for leaf in leaves:
             assert leaf._fx > bnode._fx
 
+    @requires_pil
     def test_png_renders_in_each_direction(self):
         t = parse_eml_tree(self.DESC, expand_eml=False)
         for d in DIRECTIONS:
             png = t.flow_png(direction=d, width=400, height=300)
             assert png[:8] == b"\x89PNG\r\n\x1a\n", f"{d} PNG malformed"
 
+    @requires_pil
     def test_pdf_renders_in_each_direction(self):
         t = parse_eml_tree(self.DESC, expand_eml=False)
         for d in DIRECTIONS:
@@ -336,6 +350,7 @@ class TestMultiOutput:
         svg = t.flow_svg(output_label="x")
         assert "±" not in svg
 
+    @requires_pil
     def test_png_multi_output(self):
         t = parse_eml_tree(self.DESC, expand_eml=False)
         png = t.flow_png(output_label=["x_+", "x_-"], width=600, height=400)
@@ -546,6 +561,7 @@ class TestFlowHTML:
 # PNG renderer
 # ---------------------------------------------------------------------------
 
+@requires_pil
 class TestFlowPNG:
     def test_returns_bytes(self):
         t = parse_eml_tree(

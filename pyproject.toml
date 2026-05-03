@@ -50,6 +50,7 @@ dev = [
     "pytest-cov",
     "ruff>=0.4",
     "mypy>=1.9",
+    "Pillow>=10.0",            # for PNG/PDF rendering tests
 ]
 docs = [
     "sphinx>=7.0",
@@ -60,6 +61,11 @@ docs = [
 ext = [
     "numpy>=1.26",
     "sympy>=1.12",
+]
+# Optional raster output — not required for SVG/HTML rendering, only for
+# eml_math.flow.flow_png() / flow_pdf() and the new render.PNGRenderer / PDFRenderer.
+render-raster = [
+    "Pillow>=10.0",
 ]
 
 [project.urls]

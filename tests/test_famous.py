@@ -13,6 +13,20 @@ from eml_math.famous import (
     FAMOUS, FamousEquation, get, by_category, all_equations,
 )
 
+# PNG/PDF rendering requires Pillow (optional dep). Skip those tests in
+# environments that don't have it installed (e.g. minimal CI runners).
+_HAS_PIL = pytest.importorskip.__module__ is not None  # always True
+try:
+    import PIL  # noqa: F401
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+requires_pil = pytest.mark.skipif(
+    not _HAS_PIL,
+    reason="Pillow not installed — install eml-math[render-raster] to enable PNG/PDF tests",
+)
+
 
 # ── Registry sanity ─────────────────────────────────────────────────────────
 
@@ -111,6 +125,7 @@ def test_renders_svg(name: str) -> None:
         assert lbl in svg, f"output label {lbl!r} missing from SVG"
 
 
+@requires_pil
 @pytest.mark.parametrize("name", sorted(FAMOUS.keys()))
 def test_renders_png(name: str) -> None:
     eq = get(name)
@@ -118,6 +133,7 @@ def test_renders_png(name: str) -> None:
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
 
 
+@requires_pil
 @pytest.mark.parametrize("name", sorted(FAMOUS.keys()))
 def test_renders_pdf(name: str) -> None:
     eq = get(name)
