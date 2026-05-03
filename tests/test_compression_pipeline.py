@@ -38,10 +38,11 @@ class TestGet:
         r = get('e')
         assert r.error < 1e-12
 
-    def test_get_pi_formula_contains_pi(self):
+    def test_get_pi_formula_contains_pi_or_derivation(self):
+        # v1.0.0: formula is the EML derivation, e.g. "4·arctan(1)".
         r = get('pi')
         assert r is not None
-        assert 'π' in r.formula
+        assert ('π' in r.formula) or ('arctan' in r.formula)
 
     def test_get_pi_unicode_alias(self):
         r1 = get('pi')
@@ -75,10 +76,11 @@ class TestGet:
         assert r1 is not None and r2 is not None
         assert r1.formula == r2.formula
 
-    def test_get_phi_formula_contains_phi(self):
+    def test_get_phi_formula_contains_phi_or_derivation(self):
+        # v1.0.0: formula is the EML derivation, e.g. "(1 + sqrt(5))/2".
         r = get('phi')
         assert r is not None
-        assert 'φ' in r.formula
+        assert ('φ' in r.formula) or ('sqrt(5)' in r.formula)
 
     def test_get_golden_ratio_alias(self):
         r1 = get('phi')

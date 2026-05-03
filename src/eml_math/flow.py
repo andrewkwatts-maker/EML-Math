@@ -311,6 +311,7 @@ def _assign_colors(
     leaf_color: dict,
     *,
     bypass_identity: bool = True,
+    skip_from_blend: Optional[set] = None,
 ) -> Tuple[float, float, float]:
     """Recursively colour every node by averaging its children's colours.
 
@@ -323,13 +324,19 @@ def _assign_colors(
         the R leg likewise vanishes.
     The excluded child still gets coloured (its short-stub branch is
     drawn) but doesn't blend up the tree.
+
+    ``skip_from_blend`` is an optional set of leaf ids that get
+    excluded from the parent's colour blend at any position (used to
+    keep "constants are stubs" leaves from bleeding their colour up).
     """
+    skip_from_blend = skip_from_blend or set()
     if not node.children:
         rgb = leaf_color[id(node)]
         node._fcolor = rgb
         return rgb
 
-    child_rgbs = [_assign_colors(c, leaf_color, bypass_identity=bypass_identity)
+    child_rgbs = [_assign_colors(c, leaf_color, bypass_identity=bypass_identity,
+                                 skip_from_blend=skip_from_blend)
                   for c in node.children]
 
     contributing = list(child_rgbs)
@@ -347,7 +354,16 @@ def _assign_colors(
                 continue
             if (not is_L) and label == "1":
                 continue
+            if id(child) in skip_from_blend:
+                continue
             keep.append(rgb)
+        if keep:
+            contributing = keep
+    elif skip_from_blend:
+        # Without the LR identity-bypass, still allow `skip_from_blend`
+        # to exclude collapsed-constant leaves from the blend.
+        keep = [rgb for child, rgb in zip(node.children, child_rgbs)
+                if id(child) not in skip_from_blend]
         if keep:
             contributing = keep
 
@@ -385,6 +401,115 @@ def _to_pure_eml_tree(node: "EMLTreeNode") -> "EMLTreeNode":
     behind an unlabelled junction."""
     from eml_math.tree import _to_pure_eml
     return _to_pure_eml(node)
+
+
+# ── Static-subtree collapse ──────────────────────────────────────────────────
+#
+# A subtree is *static* iff no descendant leaf is a variable (kind=='vec').
+# It can be evaluated to a single number at parse time. Drawing the full
+# pure-EML expansion of a constant like ``2`` adds visual noise without
+# adding information. Collapsing each maximal static subtree into a
+# single SCALAR leaf labelled with the evaluated value gives the same
+# equation in much less screen real estate. Combined with `inline_constants`
+# the leaf renders as a short black stub indistinguishable from 0/1
+# sentinels — exactly what you want when the only "real" inputs are
+# variables, and constants are along for the ride.
+
+def _is_static_subtree(node: "EMLTreeNode") -> bool:
+    from eml_math.tree import NodeKind
+    if not node.children:
+        return node.kind != NodeKind.VEC
+    return all(_is_static_subtree(c) for c in node.children)
+
+
+def _eval_static_subtree(node: "EMLTreeNode") -> float:
+    """Numerically evaluate a variable-free tree. Pure-EML semantics with
+    the bottom-sentinel shortcut and a |·| frame guard on R so ln never
+    explodes; compound nodes (sin, cos, mul, pow, …) evaluate via the
+    matching math.* function or arithmetic."""
+    import math as _math
+    from eml_math.tree import NodeKind
+
+    def _leaf(n):
+        if n.kind == NodeKind.BOTTOM or n.label == "0":
+            return 0.0
+        if n.label in ("1", "1.0"):
+            return 1.0
+        if n.kind == NodeKind.PI or n.label in ("π", "pi"):
+            return _math.pi
+        if n.label == "e":
+            return _math.e
+        try:
+            return float(n.label)
+        except (ValueError, TypeError):
+            raise ValueError(f"static eval: leaf {n.label!r}")
+
+    def _walk(n):
+        if not n.children:
+            return _leaf(n)
+        if n.label == "eml" and len(n.children) == 2:
+            L, R = n.children
+            lv = 0.0 if (L.kind == NodeKind.BOTTOM and L.label == "0") else _math.exp(_walk(L))
+            rv = _walk(R)
+            rs = abs(rv) if rv <= 0 else rv
+            if rs == 0:
+                rs = 1e-300
+            return lv - _math.log(rs)
+        ch = [_walk(c) for c in n.children]
+        op = n.label
+        if op == "exp"  and len(ch) == 1: return _math.exp(ch[0])
+        if op == "ln"   and len(ch) == 1: return _math.log(abs(ch[0]) if ch[0] <= 0 else ch[0])
+        if op == "neg"  and len(ch) == 1: return -ch[0]
+        if op == "add"  and len(ch) == 2: return ch[0] + ch[1]
+        if op == "sub"  and len(ch) == 2: return ch[0] - ch[1]
+        if op == "mul"  and len(ch) == 2: return ch[0] * ch[1]
+        if op == "div"  and len(ch) == 2: return ch[0] / ch[1]
+        if op == "sqrt" and len(ch) == 1: return _math.sqrt(ch[0])
+        if op == "sqr"  and len(ch) == 1: return ch[0] * ch[0]
+        if op in ("pow", "pow_fn") and len(ch) == 2: return ch[0] ** ch[1]
+        if op == "inv"  and len(ch) == 1: return 1.0 / ch[0]
+        if op.startswith("×") and len(ch) == 1:
+            try: return float(op[1:]) * ch[0]
+            except ValueError: pass
+        if hasattr(_math, op) and len(ch) == 1:
+            return getattr(_math, op)(ch[0])
+        raise ValueError(f"static eval: unsupported {op!r}")
+    return _walk(node)
+
+
+def _format_static_value(v: float) -> str:
+    import math as _math
+    if not _math.isfinite(v):
+        return "∞"
+    if abs(v - _math.pi) < 1e-12: return "π"
+    if abs(v - _math.e)  < 1e-12: return "e"
+    if abs(v - round(v)) < 1e-9 and abs(v) < 1e9:
+        return str(int(round(v)))
+    if abs(v) >= 1e6 or (v != 0 and abs(v) < 1e-3):
+        return f"{v:.3g}"
+    return f"{v:g}"
+
+
+def _collapse_static_subtrees(node: "EMLTreeNode") -> "EMLTreeNode":
+    """Replace every *maximal* static subtree with a single SCALAR leaf
+    whose label is the evaluated value. ``0``/``1`` sentinel leaves pass
+    through unchanged (already minimal). A tree with no variable leaves
+    at all collapses to one leaf."""
+    from eml_math.tree import EMLTreeNode, NodeKind
+    if not node.children:
+        return node
+    def _walk(n):
+        if not n.children:
+            return n
+        if _is_static_subtree(n):
+            try:
+                v = _eval_static_subtree(n)
+            except (ValueError, OverflowError, ZeroDivisionError):
+                return n
+            return EMLTreeNode(label=_format_static_value(v), kind=NodeKind.SCALAR)
+        return EMLTreeNode(label=n.label, kind=n.kind, eml_form=n.eml_form,
+                           children=[_walk(c) for c in n.children])
+    return _walk(node)
 
 
 def _stub_inline_leaves(
@@ -482,6 +607,7 @@ def _layout(
     bypass_identity_blend: bool = True,
     random_palette: bool = False,
     relax_passes: int = 4,
+    inline_constants_black: bool = False,    # paint all numeric leaves BLACK and exclude from parent blend
     min_spacing: float = 22.0,
 ) -> Tuple["EMLTreeNode", List["EMLTreeNode"]]:
     """Returns (binarised_root, leaves_in_cross-axis-order)."""
@@ -528,6 +654,12 @@ def _layout(
         if leaf.label in fc:
             label_to_color.setdefault(leaf.label, tuple(fc[leaf.label]))
             continue
+        # Inline-constants paint every numeric leaf BLACK so the colour
+        # doesn't propagate up the tree and bleed into chains that the
+        # constant only nominally feeds.
+        if inline_constants_black and _is_numeric_label(leaf.label):
+            label_to_color.setdefault(leaf.label, (0, 0, 0))
+            continue
         if leaf.label in label_to_color:
             continue
         if random_palette or next_palette_idx >= len(palette):
@@ -536,7 +668,16 @@ def _layout(
             label_to_color[leaf.label] = tuple(palette[next_palette_idx])
             next_palette_idx += 1
     leaf_color = {id(l): label_to_color[l.label] for l in leaves}
-    _assign_colors(node, leaf_color, bypass_identity=bypass_identity_blend)
+    # Build the per-leaf "skip from blend" set: every numeric inline leaf
+    # gets dropped from the parent's colour blend (same treatment as the
+    # 0/1 sentinels under bypass_identity).
+    skip_from_blend: set = set()
+    if inline_constants_black:
+        for leaf in leaves:
+            if _is_numeric_label(leaf.label):
+                skip_from_blend.add(id(leaf))
+    _assign_colors(node, leaf_color, bypass_identity=bypass_identity_blend,
+                   skip_from_blend=skip_from_blend)
     return node, leaves
 
 
@@ -554,6 +695,7 @@ def flow_svg(
     expand_symbols: bool = False,
     merge_inputs: bool = False,              # deduplicate identical inputs into one
     inline_constants: bool = False,          # numeric leaves render at their branch endpoint
+    collapse_constants: bool = False,        # variable-free subtrees → single SCALAR leaf with evaluated value
     fixed_colors: Optional[dict] = None,     # override colours for special labels (0, 1, …)
     fixed_label_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,      # skip L=0 and R=1 from the colour blend
@@ -605,6 +747,12 @@ def flow_svg(
     multi_output = not isinstance(output_label, str)
     output_labels = list(output_label) if multi_output else [output_label]
 
+    # Constant collapse: replace every variable-free subtree with a single
+    # SCALAR leaf carrying the evaluated value. With `inline_constants` on,
+    # those leaves render as short black stubs — exactly like 0/1 sentinels.
+    if collapse_constants:
+        node = _collapse_static_subtrees(node)
+
     # Figure out leaf-label text length for cross-axis margin sizing.
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
@@ -655,6 +803,7 @@ def flow_svg(
         fixed_colors=fc,
         bypass_identity_blend=bypass_identity_blend,
         random_palette=random_palette,
+        inline_constants_black=inline_constants,
     )
 
     # Reposition 0/1 (and other inline) leaves to sit RIGHT NEXT TO their
@@ -724,6 +873,13 @@ def flow_svg(
     for leaf in inline_leaves:
         if omit_identity_labels and _is_identity_position(leaf):
             continue   # the grey stub alone communicates 0-on-L / 1-on-R
+        # When inline_constants is on AND we're omitting identity labels,
+        # treat *every* numeric inline leaf as anonymous — the short black
+        # stub already says "constant goes here". This matches the
+        # convention "only variables and 0/1 sentinels carry text".
+        if (omit_identity_labels and inline_constants
+                and _is_numeric_label(leaf.label)):
+            continue
         # Use the fixed-label colour where given (so a near-white '1' stays
         # readable), otherwise the branch colour.
         text_col = _rgb_hex(flc.get(leaf.label, leaf._fcolor))
@@ -1103,6 +1259,7 @@ def _flow_png_pillow(
     expand_symbols: bool = False,
     merge_inputs: bool = False,
     inline_constants: bool = False,
+    collapse_constants: bool = False,
     fixed_colors: Optional[dict] = None,
     fixed_label_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,
@@ -1151,6 +1308,9 @@ def _flow_png_pillow(
         # of label_font_size doesn't scale with canvas size — this does.
         primary_label_size = max(primary_label_size, height * 0.5)   # room above leaves for slerp from merged inputs
 
+    if collapse_constants:
+        node = _collapse_static_subtrees(node)
+
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
     max_label_len  = max((len(l.label) for l in leaves_preview), default=1)
@@ -1186,6 +1346,7 @@ def _flow_png_pillow(
         fixed_colors=fc,
         bypass_identity_blend=bypass_identity_blend,
         random_palette=random_palette,
+        inline_constants_black=inline_constants,
     )
 
     _stub_inline_leaves(node, direction=direction, fixed_labels=fc.keys(),
@@ -1306,6 +1467,9 @@ def _flow_png_pillow(
 
     for leaf in inline_constant_leaves:
         if omit_identity_labels and _is_identity_pos(leaf):
+            continue
+        if (omit_identity_labels and inline_constants
+                and _is_numeric_label(leaf.label)):
             continue
         text_rgb = tuple(int(round(v)) for v in flc.get(leaf.label, leaf._fcolor))
         bbox = draw.textbbox((0, 0), leaf.label, font=font_label)

@@ -1,16 +1,16 @@
 """
-Render every entry of eml_math.famous in several post-process *styles*.
+Render every entry of eml_math.famous in two layout styles.
 
-Each style is a layout post-process applied to the same parsed tree, then
-rendered to PNG + PDF in its own subfolder under the output directory:
+Both styles render the same tree with two simplifying conventions on:
+constants are collapsed into single SCALAR leaves (each variable-free
+subtree → one leaf labelled with its evaluated value), and those leaves
+plus all 0/1 sentinels render as short black stubs at their parent
+junction. The only "real" leaves of the tree are then the variables.
 
     famous_gallery/
-        formal/        — default, no post-process
-        gentle/        — gentle_curves(bend=0.25): long, soft sweeps
-        tightened/     — tighten_base(by=0.5): less wiggle in the deep layers
-        tree/          — spread_horizontal(factor=1.45): more breathing room
-        gentle_tight/  — both gentle_curves and tighten_base composed
-        index.html     — single page that re-renders each style in-browser
+        formal/        — default columnar layout
+        organic/       — branches tilt as they grow up
+        index.html     — landing page
 
 Run from the EML-Math repo root:
     python examples/famous_gallery.py [output_dir]
@@ -26,14 +26,9 @@ from eml_math.tree import to_compact
 from eml_math.web import get_flow_js
 from eml_math.flow_layout import (
     to_layout, render_png, render_pdf,
-    gentle_curves, tighten_base, spread_horizontal,
     fit_to_canvas, organic_layout,
 )
 
-
-# ── Style definitions ───────────────────────────────────────────────────────
-# Each style is (folder_name, post-process pipeline).
-# Every pipeline ends with fit_to_canvas so the result never crops.
 
 def _pipe(*fns):
     def composed(L):
@@ -42,24 +37,27 @@ def _pipe(*fns):
         return L
     return composed
 
+
+# Two clean styles. Both apply constant-collapse + inline-constants at
+# tree-build time (handled by `to_layout`); the post-processes only
+# adjust geometry.
 STYLES = {
-    "formal":   lambda L: fit_to_canvas(L),                                    # current default
-    "gentle":   _pipe(lambda L: gentle_curves(L, bend=0.55), fit_to_canvas),   # flowing curves
-    "tree":     _pipe(lambda L: spread_horizontal(L, factor=1.7), fit_to_canvas),
-    "organic":  _pipe(lambda L: organic_layout(L,
-                                               branch_angle=22.0,
-                                               length_scale=42.0)),
+    "formal":  fit_to_canvas,
+    "organic": _pipe(organic_layout, fit_to_canvas),
 }
 
 WIDTH, HEIGHT = 720, 440
 
 
 def _gen_layout(eq):
-    """Build the un-post-processed layout dict for a famous equation."""
+    """Build the layout dict for a famous equation. Constants are
+    collapsed into single SCALAR leaves and rendered as inline stubs."""
     return to_layout(
         eq.parse(),
         width=WIDTH, height=HEIGHT,
         output_label=eq.output,
+        collapse_constants=True,
+        inline_constants=True,
     )
 
 
@@ -84,19 +82,12 @@ def main() -> None:
             (out_dir / style / "pdf" / f"{eq.name}.pdf").write_bytes(pdf)
         print(f"  {eq.category:9s} {eq.name}")
 
-    # Standalone HTML viewer per style
     js = get_flow_js()
     for style, post in STYLES.items():
         rows = []
         for cat in ("physics", "geometry", "math"):
             rows.append(f"<h2>{cat.capitalize()}</h2>")
             for eq in by_category(cat):
-                L = post(_gen_layout(eq)) if post else _gen_layout(eq)
-                # For the in-browser version we ship the raw EML tree —
-                # the JS side runs its own (formal-style) layout. Pre-baked
-                # post-processed PNG is the canonical output for each style.
-                tree_json = json.dumps(to_compact(eq.parse()))
-                label_json = json.dumps(eq.output)
                 rows.append(f'''
                   <article>
                     <h3>{_esc(eq.title)} <code class="hint">{_esc(eq.description)}</code></h3>
@@ -129,7 +120,6 @@ def main() -> None:
 """
         (out_dir / style / "index.html").write_text(html, encoding="utf-8")
 
-    # Top-level index linking all styles
     top_index = "<!doctype html><html><head><meta charset='utf-8'><title>EML-Math gallery</title></head>"
     top_index += "<body style='font:16px/1.5 system-ui;max-width:680px;margin:2em auto;padding:0 1em'>"
     top_index += "<h1>EML-Math famous-equations gallery</h1><ul>"

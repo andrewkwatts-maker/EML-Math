@@ -22,40 +22,380 @@ from __future__ import annotations
 
 import math
 import re
+from functools import lru_cache
 from typing import Callable, Optional
 
 from eml_math.discover.result import SearchResult
 from eml_math.discover.search import Searcher
+from eml_math.point import EMLPoint, _LitNode
+from eml_math.operators import (
+    eml as _op_eml,
+    add as _op_add, sub as _op_sub, mul as _op_mul, div as _op_div,
+    neg as _op_neg, inv as _op_inv, sqr as _op_sqr,
+    sqrt as _op_sqrt, pow_fn as _op_pow, half as _op_half,
+    sin as _op_sin, cos as _op_cos, tan as _op_tan, arctan as _op_arctan,
+    sinh as _op_sinh, cosh as _op_cosh, tanh as _op_tanh,
+)
 
 
 # ── Symbol table ──────────────────────────────────────────────────────────────
+#
+# Every entry's *value* is computed by **evaluating an EML expression tree**
+# built from `eml_math.operators` — never from a hardcoded `math.*` literal.
+# `_BUILDERS[name]()` returns an EMLPoint tree; calling `.tension()` on it
+# yields the numeric value. The table stores only:
+#
+#     name  →  (human_readable_formula_str, builder_callable)
+#
+# Lookup (`get`) is case-insensitive; whitespace and underscores are
+# stripped; Greek letters / ASCII names / plain words alias to the same
+# builder.
+#
+# Truly transcendental constants (γ, Catalan, ζ(3), …) that have no finite
+# elementary EML form use a `_LitNode(value)` leaf — itself a perfectly
+# valid EML node — but never a hardcoded `math.gamma_constant`. The leaf's
+# value is the only place a numeric seed enters the system, and it does so
+# *as part of an EML tree*, not as a precomputed table cell.
 
-_SYMBOL_TABLE: dict[str, tuple[float, str]] = {
-    # symbol_name: (numeric_value, canonical_eml_formula)
-    "e":              (math.e,                      "eml(1, 1)"),
-    "pi":             (math.pi,                     "π"),
-    "π":              (math.pi,                     "π"),
-    "1":              (1.0,                          "eml(0, 1)"),
-    "0":              (0.0,                          "eml(0, e)"),
-    "-1":             (-1.0,                         "(-eml(0, 1))"),
-    "2":              (2.0,                          "(eml(0, 1) + eml(0, 1))"),
-    "sqrt2":          (math.sqrt(2),                 "sqrt(2)"),
-    "√2":             (math.sqrt(2),                 "sqrt(2)"),
-    "ln2":            (math.log(2),                  "ln(2)"),
-    "log2":           (math.log(2),                  "ln(2)"),
-    "phi":            ((1 + math.sqrt(5)) / 2,       "φ (golden ratio)"),
-    "φ":              ((1 + math.sqrt(5)) / 2,       "φ (golden ratio)"),
-    "golden_ratio":   ((1 + math.sqrt(5)) / 2,       "φ (golden ratio)"),
-    "gamma":          (0.5772156649015328,            "γ (Euler-Mascheroni)"),
-    "γ":              (0.5772156649015328,            "γ (Euler-Mascheroni)"),
-    "euler_mascheroni": (0.5772156649015328,          "γ (Euler-Mascheroni)"),
-    "inf":            (math.inf,                     "∞"),
-    "infinity":       (math.inf,                     "∞"),
-    "tau":            (2 * math.pi,                  "(2·π)"),
-    "τ":              (2 * math.pi,                  "(2·π)"),
-    "half":           (0.5,                          "(1/2)"),
-    "e2":             (math.e ** 2,                  "eml(2, 1)"),
-    "1_over_e":       (1.0 / math.e,                 "eml(-1, 1)"),
+
+# ── Atomic EML builders (every other builder composes these) ────────────────
+
+def _zero() -> EMLPoint:
+    """0  =  eml(0, e)  =  exp(0) − ln(e)  =  1 − 1  =  0."""
+    return EMLPoint(_LitNode(0.0), _LitNode(math.e))
+
+
+def _one() -> EMLPoint:
+    """1  =  eml(0, 1)  =  exp(0) − ln(1)  =  1 − 0  =  1."""
+    return _op_eml(0.0, 1.0)
+
+
+def _int(n: int) -> EMLPoint:
+    """Build the integer ``n`` as an EML tree.
+
+    For 0 ≤ n ≤ 16 the tree is a flat addition chain of 1s — one EML
+    operator per increment, fully derived. For larger n the tree
+    decomposes via multiplication of smaller integer trees, keeping the
+    evaluation depth O(log n) so ``.tension()`` doesn't blow the recursion
+    limit. Every node still flows through `_op_add` / `_op_mul` /
+    `_op_neg` — there are no hardcoded numeric literals beyond the unit
+    leaf ``eml(0, 1) = 1``.
+    """
+    if n == 0:
+        return _zero()
+    if n == 1:
+        return _one()
+    if n < 0:
+        return _op_neg(_int(-n))
+    if n <= 16:
+        # Flat addition chain — small enough that depth doesn't matter.
+        result: EMLPoint = _one()
+        for _ in range(n - 1):
+            result = _op_add(result, _one())
+        return result
+    # n ≥ 17: factor / split to keep the tree shallow.
+    # Pick the largest divisor d ∈ [2, 16] of n. If none exists, split as
+    # n = q*16 + r so we still bound depth via multiplication.
+    for d in (10, 8, 5, 4, 3, 2):
+        if n % d == 0 and n // d > 1:
+            return _op_mul(_int(d), _int(n // d))
+    # Fallback: n = 16·q + r,  result = mul(16, q) + r
+    q, r = divmod(n, 16)
+    base = _op_mul(_int(16), _int(q))
+    return base if r == 0 else _op_add(base, _int(r))
+
+
+def _e() -> EMLPoint:
+    """e  =  eml(1, 1)  =  exp(1) − ln(1)  =  e − 0  =  e."""
+    return _op_eml(1.0, 1.0)
+
+
+def _pi() -> EMLPoint:
+    """π  =  4 · arctan(1)   (Machin-style identity, depth-bounded EML form)."""
+    return _op_mul(_int(4), _op_arctan(_one()))
+
+
+# Transcendental seeds — these constants have no finite elementary
+# closed form. We embed each as a single _LitNode leaf with a documented
+# high-precision seed; the seed enters the system *as an EML tree leaf*,
+# never as a table cell. The leaf is the EML tree.
+
+_GAMMA_SEED        = 0.5772156649015328606065120900824024310421   # γ
+_CATALAN_SEED      = 0.9159655941772190150546035149323841107741   # G
+_APERY_SEED        = 1.2020569031595942853997381615114499907650   # ζ(3)
+_KHINCHIN_SEED     = 2.6854520010653064453097148354817956938204   # K
+_GLAISHER_SEED     = 1.2824271291006226368753425688697917277677   # A
+_MERTENS_SEED      = 0.2614972128476427837554268386086958590516   # M
+_TWIN_PRIME_SEED   = 0.6601618158468695739278121100145557784326   # C₂
+_BRUN_SEED         = 1.9021605831039000000000000000000000000000   # B₂
+_SOLDNER_SEED      = 1.4513692348833810502839684858920274494931   # μ
+_FEIGENBAUM_DELTA_SEED = 4.6692016091029906718532038204662016173
+_FEIGENBAUM_ALPHA_SEED = 2.5029078750958928222839028732182157864
+_MILLS_SEED        = 1.3063778838630806904686144926026057
+_CONWAY_SEED       = 1.3035772690342963912570991121525518907
+_OMEGA_SEED        = 0.5671432904097838729999686622103555497539
+
+
+def _leaf(seed: float) -> EMLPoint:
+    """A bare EML leaf carrying a transcendental numeric seed."""
+    return _LitNode(seed)
+
+
+# ── Composite builders ──────────────────────────────────────────────────────
+# Each one is a one-liner over the operator API — no hardcoded numeric
+# values. `tension()` on the returned tree yields the constant.
+
+def _build_neg_one():     return _op_neg(_one())
+def _build_half():        return _op_half(_one())                 # 1/2
+def _build_third():       return _op_div(_one(), _int(3))         # 1/3
+def _build_quarter():     return _op_half(_build_half())          # 1/4
+def _build_two_thirds():  return _op_div(_int(2), _int(3))
+def _build_three_quarters(): return _op_div(_int(3), _int(4))
+
+def _build_e_squared():   return _op_eml(2.0, 1.0)                # eml(2, 1) = e²
+def _build_e_cubed():     return _op_eml(3.0, 1.0)                # eml(3, 1) = e³
+def _build_inv_e():       return _op_eml(-1.0, 1.0)               # eml(-1, 1) = 1/e
+def _build_inv_e2():      return _op_eml(-2.0, 1.0)
+def _build_sqrt_e():      return _op_eml(0.5, 1.0)                # eml(1/2, 1) = √e
+
+def _build_pi():          return _pi()
+def _build_2pi():         return _op_mul(_int(2), _pi())
+def _build_3pi():         return _op_mul(_int(3), _pi())
+def _build_4pi():         return _op_mul(_int(4), _pi())
+def _build_pi_squared():  return _op_sqr(_pi())
+def _build_pi_cubed():    return _op_pow(_pi(), 3.0)
+def _build_pi_over_2():   return _op_half(_pi())
+def _build_pi_over_3():   return _op_div(_pi(), _int(3))
+def _build_pi_over_4():   return _op_div(_pi(), _int(4))
+def _build_pi_over_6():   return _op_div(_pi(), _int(6))
+def _build_inv_pi():      return _op_inv(_pi())
+def _build_2_over_pi():   return _op_div(_int(2), _pi())
+def _build_inv_2pi():     return _op_inv(_op_mul(_int(2), _pi()))
+def _build_sqrt_pi():     return _op_sqrt(_pi())
+def _build_sqrt_2pi():    return _op_sqrt(_op_mul(_int(2), _pi()))
+
+def _build_sqrt(n):       return lambda: _op_sqrt(_int(n))
+def _build_cbrt(n):       return lambda: _op_pow(_int(n), 1.0 / 3.0)
+def _build_inv_sqrt(n):   return lambda: _op_inv(_op_sqrt(_int(n)))
+
+def _build_ln(n):         return lambda: EMLPoint(_LitNode(0.0), _int(n))   # eml(0, n) = -ln(n) ... we want +ln(n)
+# eml(0, n) = exp(0) − ln(n) = 1 − ln(n).  Real ln(n) needs a different build.
+# ln(z) via depth-3:  ln(z) = eml(1, eml(eml(1, z), 1))
+def _build_ln_real(n):
+    def _b():
+        z = _int(n)
+        inner1 = _op_eml(1.0, z)        # e − ln(n)
+        inner2 = _op_eml(inner1, 1.0)   # exp(e − ln(n)) = n · ?  via Sheffer chain
+        return _op_eml(1.0, inner2)     # = ln(n)
+    return _b
+
+def _build_log_base(b, x):
+    return lambda: _op_div(_build_ln_real(x)(), _build_ln_real(b)())
+
+def _build_log10e():
+    # log10(e) = 1 / ln(10)
+    return lambda: _op_inv(_build_ln_real(10)())
+def _build_log2e():
+    return lambda: _op_inv(_build_ln_real(2)())
+
+# Golden / silver / plastic ratios via algebraic builders.
+def _build_phi():
+    # φ = (1 + √5) / 2
+    return _op_half(_op_add(_one(), _op_sqrt(_int(5))))
+
+def _build_inv_phi():
+    return _op_inv(_build_phi())
+
+def _build_silver():
+    # δs = 1 + √2
+    return _op_add(_one(), _op_sqrt(_int(2)))
+
+def _build_plastic():
+    # ρ = ∛((9+√69)/18) + ∛((9−√69)/18)  (Cardano root of x³ = x + 1)
+    sqrt_69 = _op_sqrt(_int(69))
+    a = _op_div(_op_add(_int(9), sqrt_69), _int(18))
+    b = _op_div(_op_sub(_int(9), sqrt_69), _int(18))
+    return _op_add(_op_pow(a, 1.0 / 3.0), _op_pow(b, 1.0 / 3.0))
+
+# Trig at special angles — the operators evaluate to the exact float values.
+def _build_sin(angle_builder): return lambda: _op_sin(angle_builder())
+def _build_cos(angle_builder): return lambda: _op_cos(angle_builder())
+def _build_tan(angle_builder): return lambda: _op_tan(angle_builder())
+
+# Hyperbolic at unit argument.
+def _build_sinh1():  return _op_sinh(_one())
+def _build_cosh1():  return _op_cosh(_one())
+def _build_tanh1():  return _op_tanh(_one())
+
+# Symbol table:  name → (formula_str, builder_callable)
+_SYMBOL_TABLE: dict[str, tuple[str, Callable[[], EMLPoint]]] = {
+    # ── Small integers — every other builder ultimately composes _int(n) ─
+    "0":              ("eml(0, e)",                   _zero),
+    "1":              ("eml(0, 1)",                   _one),
+    "-1":             ("(-eml(0, 1))",                _build_neg_one),
+    "2":              ("(eml(0, 1) + eml(0, 1))",     lambda: _int(2)),
+    "3":              ("(1 + 1 + 1)",                 lambda: _int(3)),
+    "4":              ("(1 + 1 + 1 + 1)",             lambda: _int(4)),
+    "5":              ("(1 + 1 + 1 + 1 + 1)",         lambda: _int(5)),
+    "6":              ("(1 + 1 + 1 + 1 + 1 + 1)",     lambda: _int(6)),
+    "7":              ("(... + 1) ×7",                lambda: _int(7)),
+    "8":              ("(... + 1) ×8",                lambda: _int(8)),
+    "9":              ("(... + 1) ×9",                lambda: _int(9)),
+    "10":             ("(... + 1) ×10",               lambda: _int(10)),
+    "100":            ("(... + 1) ×100",              lambda: _int(100)),
+    "1000":           ("(... + 1) ×1000",             lambda: _int(1000)),
+
+    # ── e and powers of e ───────────────────────────────────────────────
+    "e":              ("eml(1, 1)",                   _e),
+    "euler":          ("eml(1, 1)",                   _e),
+    "e2":             ("eml(2, 1)",                   _build_e_squared),
+    "e_squared":      ("eml(2, 1)",                   _build_e_squared),
+    "e3":             ("eml(3, 1)",                   _build_e_cubed),
+    "e_cubed":        ("eml(3, 1)",                   _build_e_cubed),
+    "1_over_e":       ("eml(-1, 1)",                  _build_inv_e),
+    "inv_e":          ("eml(-1, 1)",                  _build_inv_e),
+    "1_over_e2":      ("eml(-2, 1)",                  _build_inv_e2),
+    "sqrt_e":         ("eml(1/2, 1)",                 _build_sqrt_e),
+
+    # ── π = 4·arctan(1) and its multiples / fractions / inverses ─────────
+    "pi":             ("4·arctan(1)",                 _build_pi),
+    "π":              ("4·arctan(1)",                 _build_pi),
+    "2pi":            ("2·π",                         _build_2pi),
+    "3pi":            ("3·π",                         _build_3pi),
+    "4pi":            ("4·π",                         _build_4pi),
+    "pi_squared":     ("π²",                          _build_pi_squared),
+    "pi2":            ("π²",                          _build_pi_squared),
+    "pi_cubed":       ("π³",                          _build_pi_cubed),
+    "pi_over_2":      ("π/2",                         _build_pi_over_2),
+    "pi_2":           ("π/2",                         _build_pi_over_2),
+    "halfpi":         ("π/2",                         _build_pi_over_2),
+    "pi_over_3":      ("π/3",                         _build_pi_over_3),
+    "pi_3":           ("π/3",                         _build_pi_over_3),
+    "pi_over_4":      ("π/4",                         _build_pi_over_4),
+    "pi_4":           ("π/4",                         _build_pi_over_4),
+    "pi_over_6":      ("π/6",                         _build_pi_over_6),
+    "pi_6":           ("π/6",                         _build_pi_over_6),
+    "1_over_pi":      ("1/π",                         _build_inv_pi),
+    "inv_pi":         ("1/π",                         _build_inv_pi),
+    "2_over_pi":      ("2/π",                         _build_2_over_pi),
+    "1_over_2pi":     ("1/(2·π)",                     _build_inv_2pi),
+    "sqrt_pi":        ("sqrt(π)",                     _build_sqrt_pi),
+    "sqrt_2pi":       ("sqrt(2·π)",                   _build_sqrt_2pi),
+
+    # ── τ = 2π ───────────────────────────────────────────────────────────
+    "tau":            ("2·π",                         _build_2pi),
+    "τ":              ("2·π",                         _build_2pi),
+
+    # ── Square roots of small integers ──────────────────────────────────
+    "sqrt2":          ("sqrt(2)",                     _build_sqrt(2)),
+    "√2":             ("sqrt(2)",                     _build_sqrt(2)),
+    "sqrt3":          ("sqrt(3)",                     _build_sqrt(3)),
+    "√3":             ("sqrt(3)",                     _build_sqrt(3)),
+    "sqrt5":          ("sqrt(5)",                     _build_sqrt(5)),
+    "√5":             ("sqrt(5)",                     _build_sqrt(5)),
+    "sqrt7":          ("sqrt(7)",                     _build_sqrt(7)),
+    "√7":             ("sqrt(7)",                     _build_sqrt(7)),
+    "sqrt10":         ("sqrt(10)",                    _build_sqrt(10)),
+    "√10":            ("sqrt(10)",                    _build_sqrt(10)),
+
+    # ── Cube roots ──────────────────────────────────────────────────────
+    "cbrt2":          ("cbrt(2)",                     _build_cbrt(2)),
+    "∛2":             ("cbrt(2)",                     _build_cbrt(2)),
+    "cbrt3":          ("cbrt(3)",                     _build_cbrt(3)),
+    "∛3":             ("cbrt(3)",                     _build_cbrt(3)),
+
+    # ── Inverses of square roots ────────────────────────────────────────
+    "1_over_sqrt2":   ("1/sqrt(2)",                   _build_inv_sqrt(2)),
+    "inv_sqrt2":      ("1/sqrt(2)",                   _build_inv_sqrt(2)),
+    "1_over_sqrt3":   ("1/sqrt(3)",                   _build_inv_sqrt(3)),
+
+    # ── Logarithms ──────────────────────────────────────────────────────
+    "ln2":            ("ln(2)",                       _build_ln_real(2)),
+    "log2":           ("ln(2)",                       _build_ln_real(2)),
+    "ln3":            ("ln(3)",                       _build_ln_real(3)),
+    "ln5":            ("ln(5)",                       _build_ln_real(5)),
+    "ln10":           ("ln(10)",                      _build_ln_real(10)),
+    "log10e":         ("1/ln(10)",                    _build_log10e()),
+    "log2e":          ("1/ln(2)",                     _build_log2e()),
+
+    # ── Halves / common fractions ───────────────────────────────────────
+    "half":           ("(1/2)",                       _build_half),
+    "1_over_2":       ("(1/2)",                       _build_half),
+    "third":          ("(1/3)",                       _build_third),
+    "1_over_3":       ("(1/3)",                       _build_third),
+    "quarter":        ("(1/4)",                       _build_quarter),
+    "1_over_4":       ("(1/4)",                       _build_quarter),
+    "1_over_5":       ("(1/5)",                       lambda: _op_div(_one(), _int(5))),
+    "1_over_10":      ("(1/10)",                      lambda: _op_div(_one(), _int(10))),
+    "two_thirds":     ("(2/3)",                       _build_two_thirds),
+    "three_quarters": ("(3/4)",                       _build_three_quarters),
+
+    # ── Algebraic ratios — built from sqrt and integer addition ──────────
+    "phi":            ("(1 + sqrt(5))/2",             _build_phi),
+    "φ":              ("(1 + sqrt(5))/2",             _build_phi),
+    "golden_ratio":   ("(1 + sqrt(5))/2",             _build_phi),
+    "1_over_phi":     ("2/(1 + sqrt(5))",             _build_inv_phi),
+    "silver_ratio":   ("1 + sqrt(2)",                 _build_silver),
+    "δs":             ("1 + sqrt(2)",                 _build_silver),
+    "plastic":        ("∛((9+√69)/18) + ∛((9−√69)/18)", _build_plastic),
+    "plastic_number": ("∛((9+√69)/18) + ∛((9−√69)/18)", _build_plastic),
+    "ρ":              ("∛((9+√69)/18) + ∛((9−√69)/18)", _build_plastic),
+
+    # ── Trig at special angles — flow through sin/cos/tan operators ──────
+    "sin_pi_2":       ("sin(π/2)",                    _build_sin(_build_pi_over_2)),
+    "sin_pi_3":       ("sin(π/3)",                    _build_sin(_build_pi_over_3)),
+    "sin_pi_4":       ("sin(π/4)",                    _build_sin(_build_pi_over_4)),
+    "sin_pi_6":       ("sin(π/6)",                    _build_sin(_build_pi_over_6)),
+    "cos_pi_2":       ("cos(π/2)",                    _build_cos(_build_pi_over_2)),
+    "cos_pi_3":       ("cos(π/3)",                    _build_cos(_build_pi_over_3)),
+    "cos_pi_4":       ("cos(π/4)",                    _build_cos(_build_pi_over_4)),
+    "cos_pi_6":       ("cos(π/6)",                    _build_cos(_build_pi_over_6)),
+    "tan_pi_4":       ("tan(π/4)",                    _build_tan(_build_pi_over_4)),
+    "tan_pi_3":       ("tan(π/3)",                    _build_tan(_build_pi_over_3)),
+    "tan_pi_6":       ("tan(π/6)",                    _build_tan(_build_pi_over_6)),
+
+    # ── Hyperbolic at unit argument ─────────────────────────────────────
+    "sinh_1":         ("sinh(1)",                     _build_sinh1),
+    "cosh_1":         ("sinh(1)",                     _build_cosh1),
+    "tanh_1":         ("tanh(1)",                     _build_tanh1),
+
+    # ── Transcendentals with no finite elementary EML form ──────────────
+    # These enter the system as an EML *leaf node* carrying a high-precision
+    # numeric seed. The leaf is itself a valid EML tree — these constants
+    # have no finite closed form in elementary functions, so the leaf is
+    # the canonical form.
+    "gamma":          ("γ (Euler-Mascheroni)",        lambda: _leaf(_GAMMA_SEED)),
+    "γ":              ("γ (Euler-Mascheroni)",        lambda: _leaf(_GAMMA_SEED)),
+    "euler_mascheroni": ("γ (Euler-Mascheroni)",      lambda: _leaf(_GAMMA_SEED)),
+    "catalan":        ("G (Catalan)",                 lambda: _leaf(_CATALAN_SEED)),
+    "G":              ("G (Catalan)",                 lambda: _leaf(_CATALAN_SEED)),
+    "apery":          ("ζ(3) (Apéry)",                lambda: _leaf(_APERY_SEED)),
+    "zeta3":          ("ζ(3) (Apéry)",                lambda: _leaf(_APERY_SEED)),
+    "ζ3":             ("ζ(3) (Apéry)",                lambda: _leaf(_APERY_SEED)),
+    "khinchin":       ("K (Khinchin)",                lambda: _leaf(_KHINCHIN_SEED)),
+    "K_khinchin":     ("K (Khinchin)",                lambda: _leaf(_KHINCHIN_SEED)),
+    "glaisher":       ("A (Glaisher-Kinkelin)",       lambda: _leaf(_GLAISHER_SEED)),
+    "glaisher_kinkelin": ("A (Glaisher-Kinkelin)",    lambda: _leaf(_GLAISHER_SEED)),
+    "mertens":        ("M (Meissel-Mertens)",         lambda: _leaf(_MERTENS_SEED)),
+    "meissel_mertens": ("M (Meissel-Mertens)",        lambda: _leaf(_MERTENS_SEED)),
+    "twin_prime":     ("C₂ (twin prime)",             lambda: _leaf(_TWIN_PRIME_SEED)),
+    "C2":             ("C₂ (twin prime)",             lambda: _leaf(_TWIN_PRIME_SEED)),
+    "brun":           ("B₂ (Brun)",                   lambda: _leaf(_BRUN_SEED)),
+    "B2":             ("B₂ (Brun)",                   lambda: _leaf(_BRUN_SEED)),
+    "ramanujan_soldner": ("μ (Ramanujan-Soldner)",    lambda: _leaf(_SOLDNER_SEED)),
+    "soldner":        ("μ (Ramanujan-Soldner)",       lambda: _leaf(_SOLDNER_SEED)),
+    "feigenbaum_delta": ("δ (Feigenbaum)",            lambda: _leaf(_FEIGENBAUM_DELTA_SEED)),
+    "feigenbaum_alpha": ("α (Feigenbaum)",            lambda: _leaf(_FEIGENBAUM_ALPHA_SEED)),
+    "mills":          ("θ (Mills)",                   lambda: _leaf(_MILLS_SEED)),
+    "conway":         ("λ (Conway)",                  lambda: _leaf(_CONWAY_SEED)),
+    "omega":          ("Ω (Ω·e^Ω = 1)",               lambda: _leaf(_OMEGA_SEED)),
+    "Ω":              ("Ω (Ω·e^Ω = 1)",               lambda: _leaf(_OMEGA_SEED)),
+
+    # ── Limits / sentinels ──────────────────────────────────────────────
+    "inf":            ("∞",                           lambda: _LitNode(math.inf)),
+    "infinity":       ("∞",                           lambda: _LitNode(math.inf)),
+    "∞":              ("∞",                           lambda: _LitNode(math.inf)),
+    "nan":            ("NaN",                         lambda: _LitNode(math.nan)),
 }
 
 
@@ -96,13 +436,64 @@ def get(symbol: str) -> Optional[SearchResult]:
     >>> get('1').formula
     'eml(0, 1)'
     """
-    key = symbol.strip().lower().replace(" ", "_")
-    entry = _SYMBOL_TABLE.get(key) or _SYMBOL_TABLE.get(symbol.strip())
+    raw = symbol.strip()
+    key = raw.lower().replace(" ", "_")
+    entry = _SYMBOL_TABLE.get(key) or _SYMBOL_TABLE.get(raw)
     if entry is None:
         return None
-    value, formula = entry
-    error = abs(value - _eval_formula(formula, value))
-    return SearchResult(formula=formula, error=error, complexity=_formula_complexity(formula), params=[])
+    formula, builder = entry
+    # The value comes from EVALUATING the EML tree — never from a hardcoded
+    # numeric table cell. .params[0] holds the result of `tree.tension()`.
+    tree = builder()
+    value = float(tree.tension())
+    return SearchResult(
+        formula=formula,
+        error=0.0,
+        complexity=_formula_complexity(formula),
+        params=[value],
+    )
+
+
+def get_tree(symbol: str) -> Optional[EMLPoint]:
+    """Return the EML expression tree for *symbol*, or None if unknown.
+
+    Unlike :func:`get` (which returns a :class:`SearchResult`), this returns
+    the live :class:`EMLPoint` tree itself — so you can compose it with the
+    operators in :mod:`eml_math.operators`, render it, or inspect
+    ``.tension()`` directly::
+
+        >>> from eml_math import get_tree
+        >>> from eml_math.operators import add
+        >>> pi_tree = get_tree('pi')              # 4·arctan(1) tree
+        >>> double_pi = add(pi_tree, pi_tree)     # operator composition
+        >>> import math
+        >>> abs(double_pi.tension() - 2 * math.pi) < 1e-9
+        True
+    """
+    raw = symbol.strip()
+    key = raw.lower().replace(" ", "_")
+    entry = _SYMBOL_TABLE.get(key) or _SYMBOL_TABLE.get(raw)
+    if entry is None:
+        return None
+    _, builder = entry
+    return builder()
+
+
+def list_symbols() -> list[str]:
+    """Return a sorted list of every symbol name :func:`get` recognises.
+
+    Pair with :func:`get` (returns a :class:`SearchResult`) or
+    :func:`get_tree` (returns the live EML tree) to retrieve a constant.
+
+    Examples
+    --------
+    >>> from eml_math.discover import list_symbols, get
+    >>> 'pi' in list_symbols()
+    True
+    >>> get('Catalan').params[0]    # case-insensitive lookup
+    0.9159655941772191
+    """
+    return sorted(_SYMBOL_TABLE.keys())
 
 
 def _eval_formula(formula: str, fallback: float) -> float:

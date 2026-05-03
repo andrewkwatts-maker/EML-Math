@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="440" viewBox="0 0 720 440" font-family="Inter, Helvetica, Arial, sans-serif">
+<path d="M253.3,220.0 C253.3,310.0 466.7,310.0 466.7,400.0" stroke="#c5bbba" stroke-width="3.0" fill="none" stroke-linecap="round"/>
+<path d="M680.0,220.0 C680.0,310.0 466.7,310.0 466.7,400.0" stroke="#afbce8" stroke-width="3.0" fill="none" stroke-linecap="round"/>
+<path d="M40.0,40.0 C40.0,130.0 253.3,130.0 253.3,220.0" stroke="#f2a598" stroke-width="3.0" fill="none" stroke-linecap="round"/>
+<path d="M466.7,40.0 C466.7,130.0 253.3,130.0 253.3,220.0" stroke="#98d1db" stroke-width="3.0" fill="none" stroke-linecap="round"/>
+<circle cx="466.7" cy="400.0" r="4.5" fill="#babcd1" stroke="#222" stroke-width="0.8"/>
+<circle cx="253.3" cy="220.0" r="4.5" fill="#c5bbba" stroke="#222" stroke-width="0.8"/>
+<circle cx="40.0" cy="40.0" r="5.0" fill="#f2a598" stroke="#222" stroke-width="0.6"/>
+<text x="40.0" y="28.0" fill="#f2a598" text-anchor="middle" font-weight="700" font-size="18">a</text>
+<circle cx="466.7" cy="40.0" r="5.0" fill="#98d1db" stroke="#222" stroke-width="0.6"/>
+<text x="466.7" y="28.0" fill="#98d1db" text-anchor="middle" font-weight="700" font-size="18">b</text>
+<circle cx="680.0" cy="220.0" r="5.0" fill="#afbce8" stroke="#222" stroke-width="0.6"/>
+<text x="680.0" y="208.0" fill="#afbce8" text-anchor="middle" font-weight="700" font-size="18">c</text>
+</svg>

@@ -95,6 +95,8 @@ from eml_math.discover import (
     compress_latex,
     decompress,
     get,
+    get_tree,
+    list_symbols,
 )
 
 from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
@@ -119,12 +121,22 @@ from eml_math.famous import (
 )
 from eml_math.web import get_flow_js, FLOW_JS_PATH
 
+# Datasheet API — uniform with metaphysica.Get / future periodica.Get.
+# Returns a JSON-serialisable dict carrying value + formula + EML tree
+# for any of the 136+ named math constants.
+from eml_math.datasheet import Get, list_constants
+
+# Abstracted render pipeline (eml_math.render) — pure-stdlib for SVG/HTML;
+# Pillow lazy-loaded only when PNG/PDF is actually rendered. Importing the
+# subpackage is cheap and adds zero runtime dependencies.
+from eml_math import render  # noqa: F401
+
 # Convenience alias — repeated `iterate()` calls salvage the v1.x pulse
 # behaviour. For trajectories use `eml_spectral.spectral_flow` (sister
 # package, sole runtime dep is `eml-math`).
 iterate = lambda point: point.iterate()
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 __author__ = "Andrew K Watts"
 
 __all__ = [
@@ -146,6 +158,10 @@ __all__ = [
     "compress_latex",
     "decompress",
     "get",
+    "get_tree",
+    "Get",                # datasheet API — returns dict
+    "list_constants",     # alias for list_symbols (EML-stack uniform name)
+    "list_symbols",
     # EML expression tree
     "EMLTreeNode",
     "NodeKind",
@@ -194,4 +210,6 @@ __all__ = [
     # Browser-side renderer (UMD JS file shipped with the package)
     "get_flow_js",
     "FLOW_JS_PATH",
+    # Abstracted render pipeline (raw JSON → layout → renderer)
+    "render",
 ]

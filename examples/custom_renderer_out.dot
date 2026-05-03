@@ -1,0 +1,12 @@
+digraph G {
+  node [shape=circle, style=filled];
+  n0 [label="mul", fillcolor="#babcd1", fontsize=10];
+  n1 [label="add", fillcolor="#c5bbba", fontsize=10];
+  n2 [label="a", fillcolor="#f2a598", fontsize=10];
+  n3 [label="b", fillcolor="#98d1db", fontsize=10];
+  n4 [label="c", fillcolor="#afbce8", fontsize=10];
+  n0 -> n1 [color="#c5bbba"];
+  n0 -> n4 [color="#afbce8"];
+  n1 -> n2 [color="#f2a598"];
+  n1 -> n3 [color="#98d1db"];
+}

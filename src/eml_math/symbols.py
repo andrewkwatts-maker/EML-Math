@@ -112,6 +112,7 @@ class Symbol:
     tree:        Optional[EMLTreeNode]
 
 
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 SYMBOLS: Dict[str, Symbol] = {}

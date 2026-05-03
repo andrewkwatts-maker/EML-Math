@@ -358,16 +358,16 @@ class TestLatexEdgeCases:
 class TestGetComprehensive:
 
     @pytest.mark.parametrize("symbol,expected_in_formula", [
-        ('e', 'eml'),
-        ('pi', 'π'),
-        ('sqrt2', 'sqrt'),
-        ('phi', 'φ'),
-        ('gamma', 'γ'),
-        ('1', 'eml(0, 1)'),
-        ('0', 'eml(0, e)'),
-        ('-1', '-'),
-        ('e2', 'eml(2, 1)'),
-        ('1_over_e', 'eml(-1, 1)'),
+        ('e',         'eml'),
+        ('pi',        'arctan'),    # v1.0.0: 4·arctan(1)
+        ('sqrt2',     'sqrt'),
+        ('phi',       'sqrt(5)'),   # v1.0.0: (1 + sqrt(5))/2
+        ('gamma',     'γ'),
+        ('1',         'eml(0, 1)'),
+        ('0',         'eml(0, e)'),
+        ('-1',        '-'),
+        ('e2',        'eml(2, 1)'),
+        ('1_over_e',  'eml(-1, 1)'),
     ])
     def test_get_formula_content(self, symbol, expected_in_formula):
         r = get(symbol)

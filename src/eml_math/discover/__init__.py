@@ -38,6 +38,8 @@ from eml_math.discover.compress import (
     compress_latex,
     decompress,
     get,
+    get_tree,
+    list_symbols,
 )
 
 
@@ -162,4 +164,6 @@ __all__ = [
     "compress_latex",
     "decompress",
     "get",
+    "get_tree",
+    "list_symbols",
 ]

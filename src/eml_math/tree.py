@@ -182,12 +182,25 @@ class EMLTreeNode:
     # JSON / dict
     # ------------------------------------------------------------------
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, *, schema: bool = True) -> Dict[str, Any]:
+        """Raw bifurcating-formula JSON.
+
+        Pure structural form — ``label``, ``kind``, optional ``eml_form``,
+        recursive ``children``. **No layout state** (no ``x``/``y``/colour
+        /canvas/render hints) — that lives in the layout dict produced by
+        :func:`eml_math.render.compute_layout` instead.
+
+        Pass ``schema=False`` to omit the top-level ``"schema"`` field
+        (e.g. for compact embedded use); by default the root carries
+        ``"schema": "eml-formula/v1"`` so consumers can self-identify.
+        """
         d: Dict[str, Any] = {"label": self.label, "kind": self.kind}
         if self.eml_form:
             d["eml_form"] = self.eml_form
         if self.children:
-            d["children"] = [c.to_dict() for c in self.children]
+            d["children"] = [c.to_dict(schema=False) for c in self.children]
+        if schema:
+            return {"schema": "eml-formula/v1", **d}
         return d
 
     def to_compact(self) -> list:
@@ -237,6 +250,35 @@ class EMLTreeNode:
         """Render this tree as a single-page PDF. See :func:`eml_math.flow.flow_pdf`."""
         from eml_math.flow import flow_pdf
         return flow_pdf(self, **kw)
+
+    # ------------------------------------------------------------------
+    # New abstracted render pipeline (eml_math.render)
+    # ------------------------------------------------------------------
+
+    def layout(self, **kw) -> Dict[str, Any]:
+        """Compute the layout dict via :func:`eml_math.render.compute_layout`.
+
+        This is the **abstracted** rendering path — produces a layout dict
+        that any renderer (built-in or third-party) can consume. The raw
+        formula JSON itself is :meth:`to_dict` and contains zero positional
+        data.
+        """
+        from eml_math.render import compute_layout
+        return compute_layout(self.to_dict(schema=False), **kw)
+
+    def render(self, fmt: str = "svg", *, layout_opts: Optional[Dict[str, Any]] = None,
+               **render_opts) -> Any:
+        """Render via the abstracted pipeline.
+
+        ``fmt`` is the registered renderer name (``"svg"``, ``"html"``,
+        ``"png"``, ``"pdf"``, or any name passed to
+        :func:`eml_math.render.register`). ``layout_opts`` are forwarded to
+        :func:`eml_math.render.compute_layout` (e.g. ``edge_style``,
+        ``direction``, ``canvas``); ``render_opts`` go to the renderer.
+        """
+        from eml_math.render import compute_layout, render_with
+        L = compute_layout(self.to_dict(schema=False), **(layout_opts or {}))
+        return render_with(fmt, L, **render_opts)
 
     # ------------------------------------------------------------------
     # SVG

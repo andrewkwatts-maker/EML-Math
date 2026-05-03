@@ -85,6 +85,7 @@ def to_layout(
     expand_symbols: bool = False,
     merge_inputs: bool = False,
     inline_constants: bool = False,
+    collapse_constants: bool = False,
     fixed_colors: Optional[dict] = None,
     bypass_identity_blend: bool = True,
     random_palette: bool = False,
@@ -114,7 +115,12 @@ def to_layout(
     if merge_inputs:
         primary_label_size = max(primary_label_size, height * 0.5)
 
-    from eml_math.flow import _expand_symbols_in_tree, _collect_leaves, _height
+    from eml_math.flow import (
+        _expand_symbols_in_tree, _collect_leaves, _height,
+        _collapse_static_subtrees,
+    )
+    if collapse_constants:
+        node = _collapse_static_subtrees(node)
     preview_root = _binarize(_expand_symbols_in_tree(node) if expand_symbols else node)
     leaves_preview = _collect_leaves(preview_root)
 
@@ -146,6 +152,7 @@ def to_layout(
         fixed_colors=fc,
         bypass_identity_blend=bypass_identity_blend,
         random_palette=random_palette,
+        inline_constants_black=inline_constants,
     )
 
     # Reposition 0/1 (and inline-numeric) leaves to short stubs.
@@ -185,6 +192,14 @@ def to_layout(
                 "color":         [int(round(v)) for v in n._fcolor],
                 "vertical_bias": 0.5,
             })
+        # Patch is_inline to include numeric-constant leaves under
+        # inline_constants — those have already been repositioned next to
+        # their parent by _stub_inline_leaves and should be drawn as
+        # short stubs rather than full chains.
+        if is_leaf and inline_constants:
+            from eml_math.flow import _is_numeric_label
+            if _is_numeric_label(n.label):
+                nodes[-1]["is_inline"] = True
         for c in n.children:
             _walk(c, nid)
 
@@ -527,6 +542,7 @@ def render_svg(layout: Dict[str, Any], *,
     primary_output_size = float(hints.get("primary_output_size",
                                           output_font_size * 2.0))
     omit_identity_labels = bool(hints.get("omit_identity_labels", True))
+    inline_constants_hint = bool(hints.get("inline_constants", False))
 
     nodes_by_id = {n["id"]: n for n in layout["nodes"]}
     children_of: Dict[str, List[str]] = {n["id"]: [] for n in layout["nodes"]}
@@ -565,11 +581,19 @@ def render_svg(layout: Dict[str, Any], *,
         )
 
     # Leaf labels
+    from eml_math.flow import _is_numeric_label as _is_num
     for n in layout["nodes"]:
         if not n.get("is_leaf"):
             continue
         # If it's an L=0 / R=1 identity leaf and omit_identity_labels is on, skip.
         if omit_identity_labels and _is_identity_leaf(n, parent_of, children_of, nodes_by_id):
+            continue
+        # When inline_constants is on AND we're omitting identity labels,
+        # treat *every* numeric inline leaf as anonymous — the short black
+        # stub already says "constant goes here". This matches the
+        # convention "only variables and 0/1 sentinels carry text".
+        if (omit_identity_labels and inline_constants_hint
+                and _is_num(n["label"])):
             continue
         text_col = _hex(FIXED_LABEL_COLORS.get(n["label"], n["color"]))
         if n.get("is_inline"):
@@ -649,6 +673,7 @@ def render_png(layout: Dict[str, Any], *, scale: float = 2.0,
     primary_output_size = float(hints.get("primary_output_size",
                                           output_font_size * 2.0))
     omit_identity_labels = bool(hints.get("omit_identity_labels", True))
+    inline_constants_hint = bool(hints.get("inline_constants", False))
     edge_width      = max(1, int(3 * scale))
     junction_radius = max(1, int(4 * scale))
 
@@ -709,10 +734,14 @@ def render_png(layout: Dict[str, Any], *, scale: float = 2.0,
 
     # Leaf labels
     pad = 12 * scale
+    from eml_math.flow import _is_numeric_label as _is_num
     for n in layout["nodes"]:
         if not n.get("is_leaf"):
             continue
         if omit_identity_labels and _is_identity_leaf(n, parent_of, children_of, nodes_by_id):
+            continue
+        if (omit_identity_labels and inline_constants_hint
+                and _is_num(n["label"])):
             continue
         text_rgb = tuple(int(round(v)) for v in
                          FIXED_LABEL_COLORS.get(n["label"], n["color"]))
