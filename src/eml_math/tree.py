@@ -539,6 +539,22 @@ def _expand(op: str, args: List[ast.expr], expand_eml: bool) -> EMLTreeNode:
                        children=children, eml_form=eml_form)
 
 
+# ── Python AST operator → eml_math.operators name ──────────────────────────
+# Lets ``_ast_to_node`` accept ordinary Python infix syntax (``a + b``,
+# ``a/b``, ``a ** b``) and route it through the same ``_expand`` machinery
+# that already understands ``ops.add(a, b)``-style calls.
+_BINOP_TO_NAME: Dict[Any, str] = {
+    ast.Add:      "add",
+    ast.Sub:      "sub",
+    ast.Mult:     "mul",
+    ast.Div:      "div",
+    ast.FloorDiv: "div",
+    ast.Pow:      "pow",
+    ast.Mod:      "mod",
+    ast.MatMult:  "mul",
+}
+
+
 # ── Main AST walker ───────────────────────────────────────────────────────────
 
 def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # noqa: C901
@@ -570,6 +586,23 @@ def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # 
         return EMLTreeNode(label=op, kind=NodeKind.COMPOUND,
                            children=children, eml_form=eml_form)
 
+    # ── binary operator: a + b, a / b, a ** b, … ─────────────────────
+    # Maps Python AST operator nodes onto eml_math.operators names so the
+    # rest of the pipeline (expand_eml, to_latex, to_compact, layout …)
+    # produces real structured output instead of an "unknown" leaf.
+    if isinstance(node, ast.BinOp):
+        name = _BINOP_TO_NAME.get(type(node.op))
+        if name is not None:
+            if expand_eml:
+                return _expand(name, [node.left, node.right], expand_eml=True)
+            kids = [_ast_to_node(a, expand_eml=False) for a in (node.left, node.right)]
+            return EMLTreeNode(
+                label=name,
+                kind=NodeKind.COMPOUND,
+                children=kids,
+                eml_form=EML_EXPANSIONS.get(name, ""),
+            )
+
     # ── attribute: ops.mul → "mul" (function without call, shouldn't happen) ─
     if isinstance(node, ast.Attribute):
         return EMLTreeNode(label=node.attr, kind=NodeKind.UNKNOWN)
@@ -589,6 +622,10 @@ def _ast_to_node(node: ast.expr, *, expand_eml: bool = True) -> EMLTreeNode:  # 
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
         inner = _ast_to_node(node.operand, expand_eml=expand_eml)
         return EMLTreeNode(label=f"-{inner.label}", kind=inner.kind)
+
+    # ── unary plus +x is a no-op ──────────────────────────────────────
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+        return _ast_to_node(node.operand, expand_eml=expand_eml)
 
     # ── tuple / list (rare) ───────────────────────────────────────────
     if isinstance(node, (ast.Tuple, ast.List)):
