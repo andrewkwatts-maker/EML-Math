@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ast
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -47,11 +48,122 @@ __all__ = [
     "NodeKind",
     "EML_EXPANSIONS",
     "parse_eml_tree",
+    "normalize_input",
+    "tree_to_python",
     "to_compact",
     "from_compact",
     "KIND_CHAR",
     "CHAR_KIND",
 ]
+
+
+# ── User-input normalisation ─────────────────────────────────────────────────
+# Accept the keystrokes people actually type when entering maths:
+#
+#   x^y      → x ** y      (caret as power)
+#   a × b    → a * b       (Unicode multiplication sign)
+#   a · b    → a * b       (LaTeX \cdot)
+#   a ÷ b    → a / b       (Unicode division)
+#   a − b    → a - b       (Unicode minus, en/em-dash from copy/paste)
+#   x²       → x ** 2      (Unicode superscripts)
+#   x₁       → x1          (Unicode subscripts)
+#
+# The Python AST / eml-math evaluator only understands ``**``, ``*``, ``/``,
+# ``-``; this single rewrite step puts user-typed math onto that canonical
+# form so callers don't have to. Idempotent — running twice produces the
+# same output.
+
+_OP_TRANSLATE = str.maketrans({
+    "×": "*",       # U+00D7 multiplication sign
+    "·": "*",       # U+00B7 middle dot (LaTeX \cdot)
+    "÷": "/",       # U+00F7 division sign
+    "−": "-",       # U+2212 minus sign
+    "–": "-",       # U+2013 en dash
+    "—": "-",       # U+2014 em dash
+})
+
+_SUPER_TRANSLATE = str.maketrans({
+    "⁰": "^0", "¹": "^1", "²": "^2", "³": "^3", "⁴": "^4",
+    "⁵": "^5", "⁶": "^6", "⁷": "^7", "⁸": "^8", "⁹": "^9",
+})
+
+_SUB_TRANSLATE = str.maketrans({
+    "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4",
+    "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9",
+})
+
+# Single ``^`` between identifiers/numbers means power. ``(?<!\*)`` and
+# ``(?!\*)`` ensure we don't touch a ``**`` the user already typed.
+_CARET_RE = re.compile(r"(?<!\*)\^(?!\*)")
+
+
+def normalize_input(text: str) -> str:
+    """Rewrite user-typed math (caret, Unicode operators, super/subscripts)
+    onto the Python form eml-math's parser expects. Idempotent and safe to
+    call on already-normalised text."""
+    if not text:
+        return text
+    t = text.translate(_OP_TRANSLATE)
+    t = t.translate(_SUPER_TRANSLATE)
+    t = t.translate(_SUB_TRANSLATE)
+    t = _CARET_RE.sub("**", t)
+    return t
+
+
+# ── Tree → Python source ─────────────────────────────────────────────────────
+# Walks a compact-mode tree (``parse_eml_tree(..., expand_eml=False)``) and
+# emits a Python expression that's both eval-safe and round-trippable
+# through ``parse_eml_tree`` again. Useful for downstream UIs that want to
+# show the user a clickable expression for any tree (e.g. famous-equation
+# chip rows).
+
+_FUNC_OPS = frozenset({
+    "exp", "ln", "log", "log10", "sin", "cos", "tan",
+    "sinh", "cosh", "tanh",
+    "arcsin", "arccos", "arctan", "asin", "acos", "atan",
+    "abs", "expm1", "log1p", "hypot", "sigmoid", "logistic",
+})
+
+
+def tree_to_python(node: "EMLTreeNode") -> str:
+    """Return a Python expression string equivalent to *node*.
+
+    Designed for compact-mode trees where internal nodes carry friendly
+    operator labels (``add``, ``mul``, ``div``, ``pow``, ``sin`` …). Pure-
+    EML trees (every internal node labelled ``eml``) round-trip through
+    ``eml(L, R) -> exp(L) - ln(R)``.
+    """
+    if not getattr(node, "children", None):
+        label = node.label or ""
+        if label.startswith("×"):
+            return label[1:]
+        return label
+
+    op = node.label
+    args = [tree_to_python(c) for c in node.children]
+    if op == "add" and len(args) == 2:
+        return f"({args[0]} + {args[1]})"
+    if op == "sub" and len(args) == 2:
+        return f"({args[0]} - {args[1]})"
+    if op == "mul" and len(args) == 2:
+        return f"({args[0]} * {args[1]})"
+    if op == "div" and len(args) == 2:
+        return f"({args[0]} / {args[1]})"
+    if op == "pow" and len(args) == 2:
+        return f"({args[0]} ** {args[1]})"
+    if op == "sqrt":
+        return f"sqrt({args[0]})"
+    if op == "inv":
+        return f"(1/{args[0]})"
+    if op == "sqr":
+        return f"({args[0]} ** 2)"
+    if op == "neg":
+        return f"(-{args[0]})"
+    if op == "eml" and len(args) == 2:
+        return f"(exp({args[0]}) - ln({args[1]}))"
+    if op in _FUNC_OPS:
+        return f"{op}({', '.join(args)})"
+    return f"{op}({', '.join(args)})"
 
 
 # ── Compact serialization ────────────────────────────────────────────────────
