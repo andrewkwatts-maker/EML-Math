@@ -1,17 +1,40 @@
 [package]
 name = "eml_core"
-version = "1.0.0"
+version = "1.4.0"
 edition = "2021"
 
 [lib]
 name = "eml_core"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["python"]
+# Python bindings (PyO3 extension module). Enabled by default so PyPI builds
+# (maturin / pip install) keep working unchanged.
+#
+# NOTE: while `python` is technically optional, the source uses bare `#[pyclass]`,
+# `#[pymethods]`, `#[new]`, `#[pyo3(get)]` attributes (not cfg_attr-gated) so the
+# `--no-default-features` build does not currently compile cleanly. The engine
+# never hits that path — `pt-eml-bridge` consumes `eml_core` with
+# `optional = true, default-features = false` and is itself gated behind the
+# `with-eml` feature flag which is off by default. When `with-eml` is enabled,
+# the engine accepts pyo3 as a transitive dep (which is fine on Windows builds
+# now that Build.bat sets `PYO3_PYTHON`). A future Wave 3 cleanup could apply
+# the dual-impl pattern (inherent impl + gated `#[pymethods]` impl) to make
+# `--no-default-features` build cleanly, but the cost is ~50 duplicated method
+# bodies across 7 source files and the benefit is marginal — see
+# `docs/integration/WAVE2_STATUS.md` follow-up #5.
+python = ["pyo3"]
+# Optional Arithma symbolic-engine bridge. ONLY available when consumed via
+# git submodule path-dep (the engine workspace) — never as a PyPI dep.
+with-arithma = ["arithma_core"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 rayon = "1.10"
 dashmap = "6"
 ordered-float = "4"
+arithma_core = { path = "../../../Arithma/rust/arithma_core", optional = true }
 
 [profile.release]
 lto = true

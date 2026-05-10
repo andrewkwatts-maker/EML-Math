@@ -137,7 +137,7 @@ from eml_math import render  # noqa: F401
 # package, sole runtime dep is `eml-math`).
 iterate = lambda point: point.iterate()
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 __author__ = "Andrew K Watts"
 
 __all__ = [
