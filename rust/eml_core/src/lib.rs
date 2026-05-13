@@ -9,11 +9,11 @@ mod metric;
 mod octonion;
 mod multivector;
 
-// Optional Arithma symbolic-substrate bridge. Only available when consumed via
+// Optional Arithmos symbolic-substrate bridge. Only available when consumed via
 // git submodule path-dep (the engine workspace) — never as a PyPI dep. See plan
-// §F.11 "Arithma as foundational expression substrate".
-#[cfg(feature = "with-arithma")]
-pub mod arithma_bridge;
+// §F.11 "Arithmos as foundational expression substrate".
+#[cfg(feature = "with-arithmos")]
+pub mod arithmos_bridge;
 
 use point::EMLPoint;
 use pair::{EMLPair, schrodinger_step_n, rotate_phase_n};

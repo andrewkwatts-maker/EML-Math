@@ -2,19 +2,19 @@
 
 ## [1.4.0] — 2026-05-10
 
-EML / Arithma / metaphysica / periodica synchronised v1.4.0 cut. Adds an
-optional Arithma symbolic-substrate bridge for engine consumers; the
+EML / Arithmos / metaphysica / periodica synchronised v1.4.0 cut. Adds an
+optional Arithmos symbolic-substrate bridge for engine consumers; the
 PyPI install path is unchanged.
 
 ### Added
 
-- **`with-arithma` Cargo feature** (off by default) — pulls in
-  `arithma_core` as an optional dependency via a `git-submodule`-only
-  path so engine consumers can carry an `ArithmaExpression` payload
+- **`with-arithmos` Cargo feature** (off by default) — pulls in
+  `arithmos_core` as an optional dependency via a `git-submodule`-only
+  path so engine consumers can carry an `ArithmosExpression` payload
   alongside the native `EMLPoint` / RPN tree. Strictly absent from the
   PyPI dep tree — `pip install eml-math` is unaffected.
-- **`src/arithma_bridge.rs`** — converters + `ArithmaPayload` trait
-  contract. Skeleton only for v1.4.0; bodies populate as the Arithma
+- **`src/arithmos_bridge.rs`** — converters + `ArithmosPayload` trait
+  contract. Skeleton only for v1.4.0; bodies populate as the Arithmos
   surface stabilises.
 
 ### Changed
