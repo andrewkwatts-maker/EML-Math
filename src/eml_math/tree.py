@@ -50,6 +50,7 @@ __all__ = [
     "parse_eml_tree",
     "normalize_input",
     "tree_to_python",
+    "expand_numeric_constants",
     "to_compact",
     "from_compact",
     "KIND_CHAR",
@@ -108,6 +109,51 @@ def normalize_input(text: str) -> str:
     t = t.translate(_SUB_TRANSLATE)
     t = _CARET_RE.sub("**", t)
     return t
+
+
+# ── Numeric-constant expansion ──────────────────────────────────────────────
+# Replaces every numeric literal in *text* with the EML-compressed formula
+# that produces it. The result, parsed with ``pure_eml=True``, gives a tree
+# where each constant is an explicit sub-graph instead of an opaque leaf.
+#
+#     expand_numeric_constants("x / 7")
+#     # → "x / ((eml((1.0000 + 1.0000), cos(1.0000)) - 1.0000))"
+#
+# ``0`` and ``1`` are sentinels in the EML primitive (``exp(⊥) = 0``,
+# ``ln(1) = 0``) — they must NOT be expanded or the tree becomes infinite.
+# Anything inside an identifier (``log10``, ``e1``, ``2x``-style implicit
+# multiplication) is left alone via the ``\b`` word boundary.
+
+_NUMERIC_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?![\w.])")
+
+
+def expand_numeric_constants(text: str) -> str:
+    """Replace each numeric literal > 1 (and decimals) in *text* with the
+    EML formula that produces that value. ``0`` and ``1`` are kept as the
+    EML primitive sentinels.
+
+    Useful for "show me how this number is built from EML primitives" —
+    feed the result into ``parse_eml_tree(..., pure_eml=True)`` and the
+    constant becomes a labelled sub-tree.
+    """
+    if not text:
+        return text
+    from eml_math.discover import compress_str
+
+    def replace(match: "re.Match[str]") -> str:
+        literal = match.group(1)
+        # Sentinels — keep as-is.
+        if literal in ("0", "1", "0.0", "1.0"):
+            return literal
+        try:
+            r = compress_str(literal)
+        except Exception:                                  # noqa: BLE001
+            return literal
+        if r is None or not getattr(r, "formula", ""):
+            return literal
+        return f"({r.formula})"
+
+    return _NUMERIC_RE.sub(replace, text)
 
 
 # ── Tree → Python source ─────────────────────────────────────────────────────

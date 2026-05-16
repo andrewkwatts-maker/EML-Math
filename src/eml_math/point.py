@@ -112,6 +112,9 @@ class EMLPoint:
         float
             Always finite unless x exceeds OVERFLOW_THRESHOLD (Slipping Wheel).
         """
+        # Rust impl: rust/eml_core/src/point.rs EMLPoint::tension
+        if _RUST_POINT and self.is_leaf() and self._D is None:
+            return _core.EMLPoint(self._x, self._y).tension()
         xv = self.x
         yv = self.y
         if xv > OVERFLOW_THRESHOLD:
@@ -135,6 +138,10 @@ class EMLPoint:
 
         Returns a new EMLPoint; the receiver is immutable.
         """
+        # Rust impl: rust/eml_core/src/point.rs EMLPoint::mirror_pulse
+        if _RUST_POINT and self.is_leaf() and self._D is None:
+            rust_nxt = _core.EMLPoint(self._x, self._y).mirror_pulse()
+            return EMLPoint(rust_nxt.x, rust_nxt.y, D=None)
         xv = self.x
         yv = self.y
 

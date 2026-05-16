@@ -103,7 +103,7 @@ from eml_math.evaluator import EMLEvaluator, eml_eval, ParseError
 from eml_math.operators import eml_scalar, eml_pi, eml_vec
 from eml_math.tree import (
     EMLTreeNode, NodeKind, EML_EXPANSIONS, parse_eml_tree,
-    normalize_input, tree_to_python,
+    normalize_input, tree_to_python, expand_numeric_constants,
     to_compact, from_compact, KIND_CHAR, CHAR_KIND,
 )
 from eml_math.flow import flow_svg, flow_html, flow_png, flow_pdf, DEFAULT_PALETTE
@@ -170,6 +170,7 @@ __all__ = [
     "parse_eml_tree",
     "normalize_input",
     "tree_to_python",
+    "expand_numeric_constants",
     # Compact tree serialisation (JSON-friendly array form)
     "to_compact",
     "from_compact",

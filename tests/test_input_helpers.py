@@ -15,6 +15,7 @@ import pytest
 
 from eml_math import (
     FAMOUS,
+    expand_numeric_constants,
     get_famous,
     normalize_input,
     parse_eml_tree,
@@ -90,3 +91,34 @@ def test_tree_to_python_compiles() -> None:
         t = parse_eml_tree(head, expand_eml=False)
         py = tree_to_python(t)
         compile(py, f"<famous:{name}>", "eval")
+
+
+# ---------------------------------------------------------------------------
+# expand_numeric_constants
+# ---------------------------------------------------------------------------
+def test_expand_keeps_sentinels() -> None:
+    """``0`` and ``1`` are EML primitive sentinels — must stay literal."""
+    assert expand_numeric_constants("0 + 1") == "0 + 1"
+    assert expand_numeric_constants("0.0 + 1.0") == "0.0 + 1.0"
+
+
+def test_expand_replaces_other_integers() -> None:
+    """Integers > 1 get rewritten as compress_str output (parenthesised)."""
+    out = expand_numeric_constants("x / 7")
+    assert "7" not in out.split("/")[1]   # the literal 7 is gone
+    assert out.startswith("x / (") and out.endswith(")")
+    # Result must be parseable as a pure-EML tree with > 1 node.
+    tree = parse_eml_tree(f"EML: {out}", pure_eml=True)
+    assert len(tree.layout()["nodes"]) > 1
+
+
+def test_expand_leaves_identifiers_alone() -> None:
+    """Word-boundaries protect ``log10``, ``e1``, etc."""
+    assert expand_numeric_constants("log10(x)") == "log10(x)"
+    assert expand_numeric_constants("e1 + e2") == "e1 + e2"
+
+
+def test_expand_empty_safe() -> None:
+    assert expand_numeric_constants("") == ""
+    assert expand_numeric_constants(None) is None    # type: ignore[arg-type]
+
