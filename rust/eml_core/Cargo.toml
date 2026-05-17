@@ -25,16 +25,12 @@ default = ["python"]
 # bodies across 7 source files and the benefit is marginal â€” see
 # `docs/integration/WAVE2_STATUS.md` follow-up #5.
 python = ["pyo3"]
-# Optional Arithmos symbolic-engine bridge. ONLY available when consumed via
-# git submodule path-dep (the engine workspace) â€” never as a PyPI dep.
-with-arithmos = ["arithmos_core"]
 
 [dependencies]
 pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
 rayon = "1.10"
 dashmap = "6"
 ordered-float = "4"
-arithmos_core = { path = "../../../Arithmos/rust/arithmos_core", optional = true }
 
 [profile.release]
 lto = true
