@@ -4,13 +4,22 @@
 
 ## [2.0.1] — 2026-05-17
 
+### Added
+
+- **`eml-math-app` CLI command** — companion-app launcher installed as a console script
+  alongside the library. On first run it locates or clones the
+  [EML-Math-App](https://github.com/andrewkwatts-maker/EML-Math-App) KivyMD desktop/Android
+  explorer at the matching version tag (`v2.0.1`) and launches it. Subsequent runs go straight
+  to launch. Developer checkouts are detected automatically via sibling-directory search from
+  `__file__`; end-user installs clone to `~/.eml-math-app`.
+
 ### Fixed
 
 - **CI:** Removed stale `arithmos_core` path dependency from `rust/eml_core/Cargo.toml`.
-  The path only exists in the local engine workspace; its presence caused all PyPI CI builds to fail
-  at cargo manifest load time, even when the feature was disabled.
-- **Dispatch:** `_dispatch.py` fallback path now correctly routes to pure Python when
-  `_arithma_core` is absent at runtime.
+  The path only exists in the local engine workspace; its presence caused all PyPI CI builds to
+  fail at cargo manifest load time, even when the feature was disabled.
+- **Dispatch:** `_dispatch.py` fallback path now correctly routes to pure Python when the
+  Rust extension is absent at runtime.
 
 ---
 
@@ -87,3 +96,10 @@
   `#[pyo3(get)]`, `#[new]`) are untouched.
 - A `--no-default-features` Rust build does not yet compile cleanly; engine consumers
   enable the bridge via their own `with-eml` feature flag, which inherits the defaults.
+
+---
+
+## [1.3.0] — 2026-05-03
+
+- Render pipeline, datasheet `Get()` API, 136 named constants, 2092 tests, CI green.
+- PNG/PDF rendering tests skip gracefully when Pillow is not installed.
