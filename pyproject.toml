@@ -68,6 +68,9 @@ render-raster = [
     "Pillow>=10.0",
 ]
 
+[project.scripts]
+eml-math-app = "eml_math._launcher:launch"
+
 [project.urls]
 Homepage = "https://github.com/andrewkwatts-maker/EML-Math"
 Repository = "https://github.com/andrewkwatts-maker/EML-Math"
