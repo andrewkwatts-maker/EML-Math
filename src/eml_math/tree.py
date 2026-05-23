@@ -888,9 +888,29 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
         return _scalar_to_latex(label)
 
     # ── pure-eml binary primitive: eml(L, R) = e^L − ln R ────────────────────
-    # Recognise common collapsed patterns BEFORE falling back to the literal form.
+    # Recognise common collapsed patterns BEFORE falling back to the literal
+    # form. Order matters — the more specific shapes are matched first so
+    # they win against the broader rules below them.
     if label == "eml" and len(cc) == 2:
         L, R = cc
+        # eml(eml(⊥, x), 1)  →  1/x        (exp(-ln(x)) collapse). Must
+        # come before the generic eml(L, 1) → e^L rule.
+        if (R.kind == NodeKind.SCALAR and R.label == "1" and not R.children
+            and L.label == "eml" and len(L.children) == 2
+            and L.children[0].kind == NodeKind.BOTTOM):
+            x_node = L.children[1]
+            # If x_node is itself an exp pattern (eml(*, 1)), the older
+            # eml(⊥, eml(x, 1)) → -x rule (matched at the outer level
+            # later) is more readable as e^(-x); skip 1/x here.
+            inner_is_exp = (
+                x_node.label == "eml" and len(x_node.children) == 2
+                and x_node.children[1].kind == NodeKind.SCALAR
+                and x_node.children[1].label == "1"
+                and not x_node.children[1].children
+            )
+            if not inner_is_exp:
+                x_tex = _render_latex(x_node, 0)
+                return f"\\frac{{1}}{{{x_tex}}}"
         # eml(x, 1)  →  e^x
         if R.kind == NodeKind.SCALAR and R.label == "1" and not R.children:
             inner = _render_latex(L, _PREC["atom"])
@@ -911,6 +931,12 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
             x = R.children[0]
             inner = _render_latex(x, _PREC["unary"])
             return _wrap(f"-{inner}", _PREC["unary"], parent_prec)
+        # eml(⊥, x)  →  -ln(x)    (simple BOTTOM — the longer specific
+        # ln/-x patterns above have already failed to match by this
+        # point, so we know R isn't one of the recognised shapes).
+        if L.kind == NodeKind.BOTTOM:
+            inner = _render_latex(R, _PREC["func"])
+            return _wrap(f"-\\ln {inner}", _PREC["unary"], parent_prec)
         # generic: e^L − ln R
         Ls = _render_latex(L, _PREC["atom"])
         Rs = _render_latex(R, _PREC["func"])
