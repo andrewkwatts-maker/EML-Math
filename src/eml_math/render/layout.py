@@ -25,7 +25,7 @@ Pure stdlib.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from eml_math.render.palette import (
     DEFAULT_PALETTE,
@@ -52,7 +52,7 @@ class _LNode:
     __slots__ = (
         "id", "label", "kind", "children",
         "x", "y", "depth", "mod", "shift",
-        "color", "raw",
+        "color", "raw", "half_width",
     )
 
     def __init__(self, raw: Dict[str, Any], idx: List[int]) -> None:
@@ -70,6 +70,10 @@ class _LNode:
         self.mod: float = 0.0    # accumulated subtree shift
         self.shift: float = 0.0  # this node's relative position within siblings
         self.color: Tuple[int, int, int] = (200, 200, 200)
+        # Half-width of the rendered label box. The contour walker adds
+        # this to the node's logical x so wide labels reserve their full
+        # box footprint, not just their centre point.
+        self.half_width: float = 0.0
 
 
 def _measure_depth(n: _LNode, d: int = 0) -> int:
@@ -83,16 +87,19 @@ def _contour(n: _LNode, mod_acc: float, side: str,
              out: Dict[int, float]) -> None:
     """Walk the left or right contour of subtree *n*, updating *out* in place.
 
-    ``out[depth]`` becomes the extreme x at that depth (min for "left",
-    max for "right"). *mod_acc* is the accumulated parent ``mod`` shift.
+    ``out[depth]`` becomes the extreme box-edge x at that depth (min for
+    "left", max for "right") — the centre plus or minus the node's
+    ``half_width``. *mod_acc* is the accumulated parent ``mod`` shift.
     """
     x = n.shift + mod_acc
     if side == "left":
-        if n.depth not in out or x < out[n.depth]:
-            out[n.depth] = x
+        edge = x - n.half_width
+        if n.depth not in out or edge < out[n.depth]:
+            out[n.depth] = edge
     else:
-        if n.depth not in out or x > out[n.depth]:
-            out[n.depth] = x
+        edge = x + n.half_width
+        if n.depth not in out or edge > out[n.depth]:
+            out[n.depth] = edge
     for c in n.children:
         _contour(c, mod_acc + n.mod, side, out)
 
@@ -204,6 +211,7 @@ def compute_layout(
     bypass_identity_blend: bool = True,
     auto_canvas: bool = True,
     min_layer_height: float = 56.0,
+    width_for_label: Optional[Callable[[str], float]] = None,
 ) -> Dict[str, Any]:
     """Lay out a raw EML formula JSON tree.
 
@@ -253,6 +261,22 @@ def compute_layout(
     idx = [0]
     root = _LNode(formula, idx)
     max_depth = _measure_depth(root, 0)
+
+    # Annotate each node with its rendered half-width so the contour
+    # walker spaces siblings by their actual box footprint, not just
+    # their centre point. Wide labels (e.g. "eml" or constant names)
+    # would otherwise collide with narrow neighbours (e.g. "0", "1").
+    if width_for_label is not None:
+        def _assign_widths(n: _LNode) -> None:
+            try:
+                w = float(width_for_label(n.label))
+            except Exception:                                  # noqa: BLE001
+                w = 0.0
+            n.half_width = max(0.0, w) / 2.0
+            for c in n.children:
+                _assign_widths(c)
+        _assign_widths(root)
+
     _layout_pass1(root, sibling_spacing, subtree_spacing)
     _layout_pass2(root, 0.0)
 
