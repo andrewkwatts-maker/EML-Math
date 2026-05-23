@@ -108,8 +108,12 @@ def _layout_pass1(n: _LNode, sibling_spacing: float,
                   subtree_spacing: float) -> None:
     """First pass: assign each node its ``shift`` relative to its parent.
 
-    Recursive post-order. Two siblings are pushed apart by the difference
-    of their contours plus *sibling_spacing*.
+    Recursive post-order. Each new sibling is packed against the
+    accumulated right-contour of *every* previously-placed sibling — not
+    just the immediate left neighbour. Walking only the latest sibling
+    misses deep "fingers" of earlier subtrees and lets a third sibling's
+    deep left finger collide with the first sibling's deep right finger
+    through a shallow middle sibling.
     """
     for c in n.children:
         _layout_pass1(c, sibling_spacing, subtree_spacing)
@@ -119,25 +123,29 @@ def _layout_pass1(n: _LNode, sibling_spacing: float,
         return
 
     # Centre children around 0; then push right siblings further to clear
-    # left siblings' right-contour.
+    # the union of all earlier siblings' right-contours.
     n.children[0].shift = 0.0
+    rcontour_acc: Dict[int, float] = {}
+    _contour(n.children[0], 0.0, "right", rcontour_acc)
+
     for i in range(1, len(n.children)):
-        left = n.children[i - 1]
         right = n.children[i]
-        rcontour: Dict[int, float] = {}
-        _contour(left, 0.0, "right", rcontour)
         lcontour: Dict[int, float] = {}
         _contour(right, 0.0, "left", lcontour)
-        # Required gap: at every depth where both contours exist, the
-        # right-contour of left + spacing must be ≤ left-contour of right.
-        push = sibling_spacing
-        for d in rcontour:
+        # Required absolute shift S for the right subtree so that at
+        # every shared depth d:  rcontour_acc[d] + sibling_spacing
+        # <= lcontour[d] + S. Equivalently S >= rcontour_acc[d]
+        # - lcontour[d] + sibling_spacing.
+        shift = sibling_spacing
+        for d in rcontour_acc:
             if d in lcontour:
-                gap = lcontour[d] - rcontour[d]
-                need = sibling_spacing - gap
-                if need > push:
-                    push = need
-        right.shift = left.shift + push + subtree_spacing * 0.0   # subtree_spacing reserved
+                need = rcontour_acc[d] - lcontour[d] + sibling_spacing
+                if need > shift:
+                    shift = need
+        right.shift = shift + subtree_spacing * 0.0   # subtree_spacing reserved
+        # Fold the newly-placed sibling's right-contour into the
+        # accumulator so the next sibling clears it too.
+        _contour(right, 0.0, "right", rcontour_acc)
 
     # Centre the parent over its children.
     mid = (n.children[0].shift + n.children[-1].shift) / 2.0
