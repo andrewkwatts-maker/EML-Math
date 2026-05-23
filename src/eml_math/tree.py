@@ -864,9 +864,55 @@ def _name_to_latex(name: str) -> str:
 def _scalar_to_latex(label: str) -> str:
     if label == "π":   return r"\pi"
     if label == "e":   return r"e"
-    if label == "⊥":   return r"\bot"
-    # number — keep as-is, but escape LaTeX specials minimally
+    # ⊥ (BOTTOM sentinel) renders as plain "0" — readability win at
+    # the cost of strict math correctness in unrecognised patterns
+    # (exp(0) = 1 ≠ exp(⊥) = 0). The recognising patterns above
+    # consume ⊥ in every common shape so it rarely surfaces verbatim.
+    if label == "⊥":   return r"0"
     return label
+
+
+def _is_pure_exp(n: "EMLTreeNode"):
+    """Return inner ``x`` if *n* matches the pure-EML exp(x) shape
+    ``eml(x, 1)``, else ``None``."""
+    if n.label != "eml" or len(n.children) != 2:
+        return None
+    R = n.children[1]
+    if R.kind != NodeKind.SCALAR or R.label != "1" or R.children:
+        return None
+    return n.children[0]
+
+
+def _is_pure_neg(n: "EMLTreeNode"):
+    """Return inner ``x`` if *n* matches the pure-EML neg(x) shape
+    ``eml(⊥, eml(x, 1))``, else ``None``."""
+    if n.label != "eml" or len(n.children) != 2:
+        return None
+    L, R = n.children
+    if L.kind != NodeKind.BOTTOM:
+        return None
+    return _is_pure_exp(R)
+
+
+def _is_pure_ln(n: "EMLTreeNode"):
+    """Return inner ``y`` if *n* matches the pure-EML ln(y) shape
+    ``eml(⊥, eml(eml(⊥, y), 1))``, else ``None``."""
+    if n.label != "eml" or len(n.children) != 2:
+        return None
+    L, R = n.children
+    if L.kind != NodeKind.BOTTOM:
+        return None
+    if R.label != "eml" or len(R.children) != 2:
+        return None
+    RR = R.children[1]
+    if RR.kind != NodeKind.SCALAR or RR.label != "1" or RR.children:
+        return None
+    RL = R.children[0]
+    if RL.label != "eml" or len(RL.children) != 2:
+        return None
+    if RL.children[0].kind != NodeKind.BOTTOM:
+        return None
+    return RL.children[1]
 
 
 def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
@@ -881,7 +927,13 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
         if kind == NodeKind.PI:
             return r"\pi"
         if kind == NodeKind.BOTTOM:
-            return r"\bot"
+            # Render as "0" — readable, matches the user's expectation
+            # that EML reads as numbers, not abstract symbols. The
+            # specific eml(⊥, …) shapes (-ln R, ln y, -x, 1/x) are
+            # consumed by the pattern matchers below, so this fallback
+            # mostly fires for compound expressions where the literal
+            # "0" placeholder is already the standard convention.
+            return r"0"
         # scalar / const — strip leading "-" handling
         if label.startswith("-") and len(label) > 1:
             return _wrap("-" + _scalar_to_latex(label[1:]), _PREC["unary"], parent_prec)
@@ -893,6 +945,25 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
     # they win against the broader rules below them.
     if label == "eml" and len(cc) == 2:
         L, R = cc
+
+        # a − b   (or a + b when b's exp argument is a neg)
+        # In pure-EML:  eml(ln(a), exp(b)) = e^{ln a} − ln(e^b) = a − b
+        # Catching this here lets the user see "1/x + y^3" rather than the
+        # full e^{...} − ln(...) nesting at the outer level of any
+        # binary-operator expression.
+        a_node = _is_pure_ln(L)
+        b_node = _is_pure_exp(R)
+        if a_node is not None and b_node is not None:
+            neg_arg = _is_pure_neg(b_node)
+            if neg_arg is not None:
+                # a − (-c)  →  a + c
+                a_tex = _render_latex(a_node, _PREC["add"])
+                c_tex = _render_latex(neg_arg, _PREC["add"])
+                return _wrap(f"{a_tex} + {c_tex}", _PREC["add"], parent_prec)
+            a_tex = _render_latex(a_node, _PREC["sub"])
+            b_tex = _render_latex(b_node, _PREC["sub"] + 1)
+            return _wrap(f"{a_tex} - {b_tex}", _PREC["sub"], parent_prec)
+
         # eml(eml(⊥, x), 1)  →  1/x        (exp(-ln(x)) collapse). Must
         # come before the generic eml(L, 1) → e^L rule.
         if (R.kind == NodeKind.SCALAR and R.label == "1" and not R.children
