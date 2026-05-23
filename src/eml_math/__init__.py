@@ -122,6 +122,9 @@ from eml_math.famous import (
 )
 from eml_math.web import get_flow_js, FLOW_JS_PATH
 
+# Companion-app launcher — `eml_math.Launch()` finds/clones EML-Math-App and runs it.
+from eml_math._launcher import launch as Launch
+
 # Datasheet API — uniform with metaphysica.Get / future periodica.Get.
 # Returns a JSON-serialisable dict carrying value + formula + EML tree
 # for any of the 136+ named math constants.
@@ -137,7 +140,7 @@ from eml_math import render  # noqa: F401
 # package, sole runtime dep is `eml-math`).
 iterate = lambda point: point.iterate()
 
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 __author__ = "Andrew K Watts"
 
 __all__ = [
@@ -216,4 +219,6 @@ __all__ = [
     "FLOW_JS_PATH",
     # Abstracted render pipeline (raw JSON → layout → renderer)
     "render",
+    # Companion app
+    "Launch",
 ]
