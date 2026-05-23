@@ -82,7 +82,7 @@ version = "1.0.0"
 
 [[package]]
 name = "eml_core"
-version = "1.4.0"
+version = "2.0.0-alpha.0"
 dependencies = [
  "arithmos_core",
  "dashmap",

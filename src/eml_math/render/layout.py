@@ -273,13 +273,24 @@ def compute_layout(
     max_x = max(n.x for n in nodes_flat)
     span = max_x - min_x if max_x > min_x else 1.0
 
-    # 4) Auto-grow canvas along the primary axis if requested.
+    # 4) Auto-grow canvas along both axes if requested.
+    #
+    # Without this, wide trees get cross-axis-compressed into the fixed
+    # canvas width and adjacent subtrees overlap visually (Reingold-Tilford
+    # only guarantees non-overlap in *logical* units, not after rescaling).
+    # The logical span is already pixel-meaningful (sibling_spacing is in
+    # the same units the renderer uses), so growing the cross axis to
+    # accommodate `span + 2*margin` preserves the algorithm's spacing
+    # guarantee end-to-end.
     if auto_canvas:
         primary_needed = (max_depth + 1) * min_layer_height + 2 * margin
+        cross_needed = span + 2 * margin
         if direction in ("down", "up"):
             height = max(height, int(primary_needed))
+            width = max(width, int(cross_needed))
         else:
             width = max(width, int(primary_needed))
+            height = max(height, int(cross_needed))
 
     # 5) Project (logical_x, depth) → (screen x, y) for the chosen direction.
     if direction in ("down", "up"):
