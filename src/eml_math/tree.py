@@ -662,8 +662,15 @@ def _expand(op: str, args: List[ast.expr], expand_eml: bool) -> EMLTreeNode:
         n_val = _extract_scalar(args[1])
         if n_val is not None:
             return _exp(_scale(n_val, _ln(x)))
-        # symbolic exponent: exp(add(ln(n), ln(x)))
-        return _exp(_add(_ln(p(args[1])), _ln(x)))
+        # Symbolic exponent.  pow(x, n) = exp(n · ln(x)) and
+        # mul(a, b) = exp(ln(a) + ln(b)) in this representation, so
+        #     n · ln(x) = mul(n, ln(x)) = exp(ln(n) + ln(ln(x)))
+        #     pow(x, n) = exp(exp(ln(n) + ln(ln(x))))
+        # The previous expansion ``exp(add(ln(n), ln(x)))`` dropped the
+        # outer ``exp`` layer and evaluated to ``n · x`` instead of
+        # ``x^n`` — visible as ``(1+1+1) · y`` for ``y**3`` whenever
+        # expand_numeric_constants had rewritten the literal exponent.
+        return _exp(_exp(_add(_ln(p(args[1])), _ln(_ln(x)))))
 
     if op in ("inv",) and len(args) == 1:
         return _exp(_neg(_ln(p(args[0]))))
@@ -1017,6 +1024,31 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
     # ── primitives & structural (expanded mode) ──────────────────────────────
     if label == "exp" and len(cc) == 1:
         c = cc[0]
+        # Pow with symbolic exponent.  ``pow(x, n)`` with a non-literal
+        # exponent expands to ``exp(exp(ln(n) + ln(ln(x))))`` — two
+        # exp layers around the add. Recognise the whole shape here
+        # and emit ``x^n`` directly; otherwise the outer ``exp`` would
+        # render as ``e^{x^n}`` and double-wrap the result.
+        if c.label == "exp" and len(c.children) == 1 \
+                and c.children[0].label == "add" \
+                and len(c.children[0].children) == 2 \
+                and c.children[0].children[0].label == "ln" \
+                and c.children[0].children[1].label == "ln":
+            inner_add = c.children[0]
+            a_inner = inner_add.children[0].children[0]
+            b_inner = inner_add.children[1].children[0]
+            if b_inner.label == "ln":
+                coeff_tex = _render_latex(a_inner, _PREC["pow"])
+                x_tex = _render_latex(b_inner.children[0], _PREC["atom"])
+                if coeff_tex == "0.5":
+                    return f"\\sqrt{{{x_tex}}}"
+                return _wrap(f"{x_tex}^{{{coeff_tex}}}", _PREC["pow"], parent_prec)
+            if a_inner.label == "ln":
+                coeff_tex = _render_latex(b_inner, _PREC["pow"])
+                x_tex = _render_latex(a_inner.children[0], _PREC["atom"])
+                if coeff_tex == "0.5":
+                    return f"\\sqrt{{{x_tex}}}"
+                return _wrap(f"{x_tex}^{{{coeff_tex}}}", _PREC["pow"], parent_prec)
         # Power vs multiplication: when ``expand_constants=True`` the
         # parser fragments numeric coefficients like 2 into add(1, 1),
         # so the SCALE form ``exp(×n(ln x))`` for ``x^n`` becomes
