@@ -957,7 +957,8 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
         # In pure-EML:  eml(ln(a), exp(b)) = e^{ln a} − ln(e^b) = a − b
         # Catching this here lets the user see "1/x + y^3" rather than the
         # full e^{...} − ln(...) nesting at the outer level of any
-        # binary-operator expression.
+        # binary-operator expression.  Zero-terms are folded
+        # (``0 + x = x``, ``0 − x = -x``, ``x − 0 = x``).
         a_node = _is_pure_ln(L)
         b_node = _is_pure_exp(R)
         if a_node is not None and b_node is not None:
@@ -966,9 +967,29 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
                 # a − (-c)  →  a + c
                 a_tex = _render_latex(a_node, _PREC["add"])
                 c_tex = _render_latex(neg_arg, _PREC["add"])
+                # When one side simplifies to 0 we just return the other
+                # operand; re-render it at the caller's parent_prec so
+                # the wrapping reflects the actual operand precedence
+                # (not the add precedence we used for the combined form).
+                if a_tex.strip() in ("0", "-0"):
+                    return _render_latex(neg_arg, parent_prec)
+                if c_tex.strip() in ("0", "-0"):
+                    return _render_latex(a_node, parent_prec)
                 return _wrap(f"{a_tex} + {c_tex}", _PREC["add"], parent_prec)
             a_tex = _render_latex(a_node, _PREC["sub"])
             b_tex = _render_latex(b_node, _PREC["sub"] + 1)
+            if a_tex.strip() in ("0", "-0"):
+                # 0 - b = -b — render b at unary so the negation
+                # wraps it correctly relative to parent_prec.
+                b_unary = _render_latex(b_node, _PREC["unary"])
+                # If the inner already starts with a unary minus, drop
+                # both negations: -(-x) → x.
+                if b_unary.lstrip().startswith("-"):
+                    return _wrap(b_unary.lstrip()[1:].lstrip(),
+                                 _PREC["unary"], parent_prec)
+                return _wrap(f"-{b_unary}", _PREC["unary"], parent_prec)
+            if b_tex.strip() in ("0", "-0"):
+                return _render_latex(a_node, parent_prec)
             return _wrap(f"{a_tex} - {b_tex}", _PREC["sub"], parent_prec)
 
         # eml(eml(⊥, x), 1)  →  1/x        (exp(-ln(x)) collapse). Must
@@ -989,11 +1010,18 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
             if not inner_is_exp:
                 x_tex = _render_latex(x_node, 0)
                 return f"\\frac{{1}}{{{x_tex}}}"
-        # eml(x, 1)  →  e^x
+        # eml(x, 1)  →  e^x       (with collapses)
+        #   e^0 = 1
+        #   e^(ln y) = y           (when L itself is the ln pattern)
         if R.kind == NodeKind.SCALAR and R.label == "1" and not R.children:
+            ln_arg = _is_pure_ln(L)
+            if ln_arg is not None:
+                return _render_latex(ln_arg, parent_prec)
             inner = _render_latex(L, _PREC["atom"])
+            if inner.strip() == "0":
+                return "1"
             return _wrap(f"e^{{{inner}}}", _PREC["pow"], parent_prec)
-        # eml(⊥, eml(eml(⊥, y), 1))  →  ln(y)
+        # eml(⊥, eml(eml(⊥, y), 1))  →  ln(y)   (and ln(1) collapses to 0)
         if (L.kind == NodeKind.BOTTOM
             and R.label == "eml" and len(R.children) == 2
             and R.children[1].kind == NodeKind.SCALAR and R.children[1].label == "1"
@@ -1001,6 +1029,8 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
             and R.children[0].children[0].kind == NodeKind.BOTTOM):
             y = R.children[0].children[1]
             inner = _render_latex(y, _PREC["func"])
+            if inner.strip() == "1":
+                return "0"
             return f"\\ln {inner}"
         # eml(⊥, eml(x, 1))  →  -x      (the pure-form of neg(x))
         if (L.kind == NodeKind.BOTTOM
@@ -1008,17 +1038,38 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
             and R.children[1].kind == NodeKind.SCALAR and R.children[1].label == "1"):
             x = R.children[0]
             inner = _render_latex(x, _PREC["unary"])
+            stripped = inner.strip()
+            if stripped == "0":
+                return "0"
+            # -(-x) → x  — any rendered output starting with a unary
+            # ``-`` (including ``-\ln x``, ``-1``, ``-x^{-1}`` …) is a
+            # negation we can cancel; we never emit ``\-`` ourselves so
+            # the leading ``-`` here is always unary minus.
+            if stripped.startswith("-"):
+                return _wrap(stripped[1:].lstrip(), _PREC["unary"], parent_prec)
             return _wrap(f"-{inner}", _PREC["unary"], parent_prec)
         # eml(⊥, x)  →  -ln(x)    (simple BOTTOM — the longer specific
         # ln/-x patterns above have already failed to match by this
         # point, so we know R isn't one of the recognised shapes).
+        # ``-ln(1) = 0`` so simplify when inner is the literal 1.
         if L.kind == NodeKind.BOTTOM:
             inner = _render_latex(R, _PREC["func"])
+            if inner.strip() == "1":
+                return "0"
             return _wrap(f"-\\ln {inner}", _PREC["unary"], parent_prec)
-        # generic: e^L − ln R
+        # generic: e^L − ln R, with simplifications:
+        #   ln(1) = 0   → drop the -ln R term
+        #   e^0  = 1   → the e^L term becomes 1
         Ls = _render_latex(L, _PREC["atom"])
         Rs = _render_latex(R, _PREC["func"])
-        s  = f"e^{{{Ls}}} - \\ln {Rs}"
+        Ls_simp = "1" if Ls.strip() == "0" else f"e^{{{Ls}}}"
+        Rs_zero = Rs.strip() == "1"
+        if Rs_zero:
+            return _wrap(Ls_simp, _PREC["pow"], parent_prec)
+        if Ls.strip() == "0":
+            # 1 - ln R  →  literal
+            return _wrap(f"1 - \\ln {Rs}", _PREC["sub"], parent_prec)
+        s  = f"{Ls_simp} - \\ln {Rs}"
         return _wrap(s, _PREC["sub"], parent_prec)
 
     # ── primitives & structural (expanded mode) ──────────────────────────────
@@ -1100,22 +1151,45 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
             return f"\\frac{{1}}{{{x}}}"
         # generic exp(x)
         inner = _render_latex(c, _PREC["atom"])
+        # e^0 = 1 — simplify so hover-on-sub-expression doesn't show
+        # the literal ``e^{0}`` scaffolding when the sub-tree collapses
+        # to that.
+        if inner.strip() == "0":
+            return "1"
         return _wrap(f"e^{{{inner}}}", _PREC["pow"], parent_prec)
 
     if label == "ln" and len(cc) == 1:
         inner = _render_latex(cc[0], _PREC["func"])
+        # ln(1) = 0 — common in pure-EML expansions where ln(1) is the
+        # zero-of-addition absorber. Simplifying makes hover-on-sub-
+        # expression read like math instead of literal-EML scaffolding.
+        if inner == "1":
+            return "0"
         return f"\\ln {inner}"
 
     if label == "add" and len(cc) >= 2:
         parts = [_render_latex(c, _PREC["add"]) for c in cc]
-        return _wrap(" + ".join(parts), _PREC["add"], parent_prec)
+        # Drop zero-valued terms — ``x + 0 = x``. Common when sub-trees
+        # contain ``ln(1) = 0`` collapsed by the ln-rule above.
+        non_zero = [p for p in parts if p.strip() not in ("0", "0.0", "-0")]
+        if not non_zero:
+            return "0"
+        if len(non_zero) == 1:
+            return _wrap(non_zero[0], _PREC["add"], parent_prec)
+        return _wrap(" + ".join(non_zero), _PREC["add"], parent_prec)
 
     if label == "sub" and len(cc) >= 2:
         # left-associative: a - b - c = (a - b) - c
         parts = [_render_latex(cc[0], _PREC["sub"])]
         for c in cc[1:]:
             parts.append(_render_latex(c, _PREC["sub"] + 1))
-        return _wrap(" - ".join(parts), _PREC["sub"], parent_prec)
+        # 0 - x = -x ; x - 0 = x
+        if parts[0].strip() == "0" and len(parts) == 2:
+            return _wrap(f"-{parts[1]}", _PREC["unary"], parent_prec)
+        kept = [parts[0]] + [p for p in parts[1:] if p.strip() not in ("0", "0.0", "-0")]
+        if len(kept) == 1:
+            return _wrap(kept[0], _PREC["sub"], parent_prec)
+        return _wrap(" - ".join(kept), _PREC["sub"], parent_prec)
 
     if label == "neg" and len(cc) == 1:
         inner = _render_latex(cc[0], _PREC["unary"])
