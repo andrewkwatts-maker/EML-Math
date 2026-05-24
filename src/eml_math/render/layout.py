@@ -89,7 +89,16 @@ def _contour(n: _LNode, mod_acc: float, side: str,
 
     ``out[depth]`` becomes the extreme box-edge x at that depth (min for
     "left", max for "right") — the centre plus or minus the node's
-    ``half_width``. *mod_acc* is the accumulated parent ``mod`` shift.
+    ``half_width``. *mod_acc* is the accumulated parent ``shift + mod``
+    offset, so every position computed is in the same frame as the
+    root of the walk's parent.
+
+    Crucial point: when descending we propagate ``n.shift + n.mod``
+    (not just ``n.mod``). Without ``n.shift`` in the accumulator,
+    descendants of any node whose shift isn't zero land in a different
+    frame from descendants of earlier siblings — the union of
+    contours then mixes frames and the gap calculation can dramatically
+    underestimate the required spacing.
     """
     x = n.shift + mod_acc
     if side == "left":
@@ -100,8 +109,9 @@ def _contour(n: _LNode, mod_acc: float, side: str,
         edge = x + n.half_width
         if n.depth not in out or edge > out[n.depth]:
             out[n.depth] = edge
+    next_mod = mod_acc + n.shift + n.mod
     for c in n.children:
-        _contour(c, mod_acc + n.mod, side, out)
+        _contour(c, next_mod, side, out)
 
 
 def _layout_pass1(n: _LNode, sibling_spacing: float,
@@ -130,6 +140,14 @@ def _layout_pass1(n: _LNode, sibling_spacing: float,
 
     for i in range(1, len(n.children)):
         right = n.children[i]
+        # CRITICAL: zero the child's shift before walking its left
+        # contour. The recursive _layout_pass1 above set ``right.shift``
+        # to the *mid* of right's own children (so that right could
+        # be centred over them) — that stale value would offset the
+        # contour walker and make the required shift come out too
+        # small. We want the lcontour in right's own local frame
+        # (root at 0); then we compute and assign the absolute shift.
+        right.shift = 0.0
         lcontour: Dict[int, float] = {}
         _contour(right, 0.0, "left", lcontour)
         # Required absolute shift S for the right subtree so that at

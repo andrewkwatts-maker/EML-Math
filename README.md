@@ -91,6 +91,61 @@ pip install eml-spectral
 
 ---
 
+## Companion app — `eml_math.Launch()`
+
+The pip wheel ships with a one-call launcher for the
+[EML-Math-App](https://github.com/andrewkwatts-maker/EML-Math-App) — a
+KivyMD visual explorer for the library. It builds the expression tree
+live as you type, renders Normal-math / EML-primitive LaTeX previews,
+draws the EML graph with hover-per-node sub-expression preview, lets
+you copy any sub-tree in Normal / EML / LaTeX / Python / JSON, and
+exports PNG at any DPI.
+
+```python
+import eml_math
+eml_math.Launch()        # finds or clones EML-Math-App, runs it
+```
+
+On first call the launcher looks for a sibling ``EML-Math-App``
+checkout next to your eml-math source directory; otherwise it clones
+the matching version tag from GitHub into ``~/.eml-math-app`` and
+``pip install -e`` it. Subsequent calls reuse the cached checkout.
+
+The app needs the Kivy stack:
+
+```bash
+pip install eml-math-app   # installs Kivy + KivyMD too
+eml-math-app               # CLI entry point if you'd rather skip Python
+```
+
+---
+
+## Public API reference
+
+Every name below is importable directly from ``eml_math``.
+
+| Group | Symbols | What it does |
+|---|---|---|
+| **Core EML node** | ``EMLPoint`` | The eml(x, y) computation node. ``.tension()`` evaluates. Composes recursively (children can be EMLPoints). |
+| **Trees & parsing** | ``EMLTreeNode``, ``NodeKind``, ``parse_eml_tree``, ``normalize_input``, ``tree_to_python``, ``EML_EXPANSIONS`` | Expression trees, JSON dict round-trip, compact ↔ pure-EML conversion, "EML:" DSL parser. |
+| **Compact ↔ array** | ``to_compact``, ``from_compact``, ``KIND_CHAR``, ``CHAR_KIND`` | JSON-array serialisation of trees (compact bracket form). |
+| **Evaluator** | ``EMLEvaluator``, ``eml_eval``, ``ParseError`` | Evaluate an "EML: …" string with a parameter map. |
+| **Operators** | ``eml_scalar``, ``eml_pi``, ``eml_vec`` | Atomic leaf factories used inside "EML: ops.…" descriptions. |
+| **Symbols** | ``Symbol``, ``SYMBOLS``, ``lookup``, ``construct``, ``register`` | Named-constant registry — e, π, φ, √2, γ, τ … |
+| **Symbolic regression** | ``Searcher``, ``SearchResult``, ``compress``, ``compress_str``, ``compress_latex``, ``recognize`` | Find an EML expression matching a target value or text. |
+| **Decompose** | ``decompress``, ``get``, ``get_tree``, ``list_symbols``, ``list_constants``, ``expand_numeric_constants`` | Convert a search result into ``math`` / ``latex`` / ``mathjax`` / ``mathml`` / ``python`` / ``eml``; rewrite numeric literals into EML form. |
+| **Datasheet API** | ``Get`` | Uniform query — returns a JSON-serialisable dict with value, formula, EML tree for any named constant. |
+| **Famous equations** | ``FamousEquation``, ``FAMOUS``, ``get_famous``, ``famous_by_category``, ``all_famous_equations`` | Curated catalogue (Pythagoras, Euler identity, mass-energy equivalence, …) — every entry round-trips through the renderers. |
+| **Legacy flow renderer** | ``flow_svg``, ``flow_html``, ``flow_png``, ``flow_pdf``, ``DEFAULT_PALETTE`` | One-shot graph rendering — see "Generating equation graphs" below. |
+| **Abstract render pipeline** | ``render``, ``to_layout``, ``render_layout_svg``, ``render_layout_png``, ``render_layout_pdf``, ``gentle_curves``, ``tighten_base``, ``spread_horizontal``, ``fit_to_canvas``, ``organic_layout`` | Layout-dict → renderer; post-process JSON to apply visual styles. |
+| **Browser bundle** | ``get_flow_js``, ``FLOW_JS_PATH`` | Inline UMD bundle for client-side rendering in HTML pages. |
+| **Companion app** | ``Launch`` | Start the EML-Math-App GUI (see section above). |
+
+Every symbol has a Python docstring — ``help(eml_math.Searcher)``,
+``help(eml_math.decompress)``, etc. read the inline documentation.
+
+---
+
 ## Quickstart — symbolic regression
 
 `Searcher` finds an EML expression that matches a target numeric value:
