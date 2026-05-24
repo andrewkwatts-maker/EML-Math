@@ -1016,12 +1016,36 @@ def _render_latex(n: "EMLTreeNode", parent_prec: int) -> str:
 
     # ── primitives & structural (expanded mode) ──────────────────────────────
     if label == "exp" and len(cc) == 1:
-        # exp(add(ln a, ln b)) → a · b   (mul collapse)
         c = cc[0]
+        # Power vs multiplication: when ``expand_constants=True`` the
+        # parser fragments numeric coefficients like 2 into add(1, 1),
+        # so the SCALE form ``exp(×n(ln x))`` for ``x^n`` becomes
+        # ``exp(add(ln(c), ln(ln(x))))`` instead — visually identical
+        # to the mul shape ``exp(add(ln a, ln b))``. We disambiguate
+        # by looking at the SECOND ln argument: if it's itself a
+        # ``ln(...)`` then the inner side is a *coefficient-times-
+        # logarithm* (i.e. ``c · ln(x)``), making the whole thing
+        # ``x^c``. Plain mul has the second ln wrapping a value, not
+        # another ln. Same trick handles the swapped order.
         if c.label == "add" and len(c.children) == 2 \
                 and c.children[0].label == "ln" and c.children[1].label == "ln":
-            a = _render_latex(c.children[0].children[0], _PREC["mul"])
-            b = _render_latex(c.children[1].children[0], _PREC["mul"])
+            a_inner = c.children[0].children[0]
+            b_inner = c.children[1].children[0]
+            if b_inner.label == "ln":
+                coeff_tex = _render_latex(a_inner, _PREC["pow"])
+                x_tex = _render_latex(b_inner.children[0], _PREC["atom"])
+                if coeff_tex == "0.5":
+                    return f"\\sqrt{{{x_tex}}}"
+                return _wrap(f"{x_tex}^{{{coeff_tex}}}", _PREC["pow"], parent_prec)
+            if a_inner.label == "ln":
+                coeff_tex = _render_latex(b_inner, _PREC["pow"])
+                x_tex = _render_latex(a_inner.children[0], _PREC["atom"])
+                if coeff_tex == "0.5":
+                    return f"\\sqrt{{{x_tex}}}"
+                return _wrap(f"{x_tex}^{{{coeff_tex}}}", _PREC["pow"], parent_prec)
+            # Plain multiplication.
+            a = _render_latex(a_inner, _PREC["mul"])
+            b = _render_latex(b_inner, _PREC["mul"])
             return _wrap(f"{a} \\cdot {b}", _PREC["mul"], parent_prec)
         # exp(sub(ln a, ln b)) → a / b
         if c.label == "sub" and len(c.children) == 2 \
