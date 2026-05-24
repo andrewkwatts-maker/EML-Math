@@ -32,7 +32,7 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
-# Claude memory
+# Local IDE / editor state
 .claude/
 
 # Misc
