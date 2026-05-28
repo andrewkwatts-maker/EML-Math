@@ -41,9 +41,43 @@ EMLPoint(1, EMLPoint(EMLPoint(1, math.e), 1)).tension()   # ln(e) = 1.0
 
 ---
 
-## What's in v1.2.0 — the slim core
+## What's new in v2.x
 
-`eml-math` v1.2.0 is the **pure-EML universal-math toolkit**: the
+The 2.x line keeps the same scope (pure-EML universal-math toolkit) but
+sharpens correctness and readability of the pure-EML LaTeX renderer.
+Highlights since v1.x:
+
+- **Numerical validation of every famous equation** — 1,000 random
+  variable combinations × 47 entries in `FAMOUS` × `EMLEvaluator` ≡ a
+  reference Python form, 46,000+ comparisons in ~2 s. See
+  [`tests/test_famous_random.py`](tests/test_famous_random.py).
+- **`pow(x, n)` is now mathematically correct** for non-literal
+  exponents — emits `exp(exp(ln(n) + ln(ln(x))))` instead of the
+  earlier incorrect `exp(add(ln(n), ln(x)))` (which collapsed to
+  `n·x`). Fixes `(x-1)**2 → (x-1)^2` after `expand_numeric_constants`.
+- **Pure-EML LaTeX recogniser** picks up `1/x`, `−ln x`, `a − b`,
+  `a + b`, `x^c` (including the double-exp pow shape) directly from
+  the pure-EML structure, in addition to the existing `e^x`, `ln x`,
+  `−x` rules.
+- **Algebraic simplifications** in the renderer: `ln(1) → 0`,
+  `e^0 → 1`, `x + 0 = x`, `0 − x = −x`, double-negation cancellation,
+  `exp(ln y) = y`. Hover-on-sub-expression reads as math instead of
+  literal EML scaffolding.
+- **BOTTOM (`⊥`) renders as `0`** — readable, not an abstract symbol.
+  The longer `eml(⊥, …)` shapes are still consumed by the pattern
+  matchers so the change only surfaces in rare compound expressions.
+- **Width-aware tidy-tree layout** — `compute_layout` accepts a
+  `width_for_label` callback; the contour walker reserves the actual
+  rendered box footprint per node so wide `eml` labels can't collide
+  with narrow `0`/`1` stubs.
+- **Layout overlap fix for deep cousins** — the contour walker now
+  propagates `n.shift + n.mod` (not just `n.mod`) when descending, so
+  descendants of every sibling live in the same frame as descendants
+  of earlier siblings.
+
+## The slim core
+
+`eml-math` stays the **pure-EML universal-math toolkit**: the
 operator, expression trees, symbolic regression, the elementary-function
 operator library, the famous-equations registry, and the flow-diagram
 renderer. Nothing else.
