@@ -356,7 +356,7 @@ _SYMBOL_TABLE: dict[str, tuple[str, Callable[[], EMLPoint]]] = {
 
     # ── Hyperbolic at unit argument ─────────────────────────────────────
     "sinh_1":         ("sinh(1)",                     _build_sinh1),
-    "cosh_1":         ("sinh(1)",                     _build_cosh1),
+    "cosh_1":         ("cosh(1)",                     _build_cosh1),
     "tanh_1":         ("tanh(1)",                     _build_tanh1),
 
     # ── Transcendentals with no finite elementary EML form ──────────────

@@ -1,9 +1,15 @@
 """Prime Tension detection — Axiom 15."""
 from __future__ import annotations
+
+import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from eml_math.state import EMLState
+
+#: Largest ``n`` the sympy-free trial-division fallback will attempt.
+#: sqrt(1e18)/2 ≈ 5e8 iterations worst case — seconds, not centuries.
+_TRIAL_DIVISION_MAX: int = 10 ** 18
 
 
 def is_prime_tension(knot: "EMLState") -> bool:
@@ -17,16 +23,27 @@ def is_prime_tension(knot: "EMLState") -> bool:
     """
     rho = knot.rho
     D = knot.point.D
-    n = round(rho * D) if D is not None else round(rho)
+    prod = rho * D if D is not None else rho
+    # round() raises OverflowError on inf and ValueError on NaN; a primality
+    # predicate should answer False for a non-finite tension, not explode.
+    if not math.isfinite(prod):
+        return False
+    n = round(prod)
     if n < 2:
         return False
     try:
         from sympy import isprime
         return bool(isprime(n))
     except ImportError:
-        # Naive trial division for small n
-        if n < 2:
-            return False
+        # Naive trial division — only viable for small n. At physical-scale
+        # D (~6.187e34) the loop would need ~1.2e17 iterations, so it is
+        # bounded and refuses rather than hanging the caller.
+        if n > _TRIAL_DIVISION_MAX:
+            raise RuntimeError(
+                f"is_prime_tension: n={n} exceeds the trial-division limit "
+                f"({_TRIAL_DIVISION_MAX}). Install sympy (pip install eml[ext]) "
+                "for large-integer primality."
+            )
         if n == 2:
             return True
         if n % 2 == 0:

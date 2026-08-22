@@ -117,10 +117,16 @@ fn boost_n(points: Vec<(f64, f64)>, phis: Vec<f64>, c: f64) -> Vec<(f64, f64)> {
 
 // ── Batch arithmetic operators (Rayon parallel) ───────────────────────────────
 
-const OVERFLOW_THRESHOLD: f64 = 709.78;
+// Must match Python's eml_math.constants.OVERFLOW_THRESHOLD == f64::MAX.ln().
+const OVERFLOW_THRESHOLD: f64 = 709.782712893384;
 
+// Mirrors Python: the 1e-300 floor applies only to zero, not to every
+// subnormal (`.max(1e-300)` also crushed y = -1e-320 up to 1e-300).
 #[inline]
-fn y_safe(y: f64) -> f64 { if y <= 0.0 { y.abs().max(1e-300) } else { y } }
+fn y_safe(y: f64) -> f64 {
+    let a = if y <= 0.0 { y.abs() } else { y };
+    if a == 0.0 { 1e-300 } else { a }
+}
 
 #[inline]
 fn xv_safe(x: f64) -> f64 { if x > OVERFLOW_THRESHOLD { x.ln() } else { x } }

@@ -233,6 +233,13 @@ class _SignedOps(metaclass=_SignedOpsMeta):
         return sign * _to_float(magnitude)
 
     @staticmethod
+    def inv(x: Any) -> float:
+        # ops.inv(x) is exp(neg(ln(x))) — exactly the log-space form this
+        # shim exists to correct, but it was falling through __getattr__
+        # unwrapped, so inv(-2) returned +0.5 while div(1, -2) returned -0.5.
+        return _SignedOps.div(1.0, x)
+
+    @staticmethod
     def pow(base: Any, exponent: Any) -> float:
         bf, ef = _to_float(base), _to_float(exponent)
         if bf >= 0:

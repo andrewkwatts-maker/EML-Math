@@ -1,7 +1,20 @@
 use pyo3::prelude::*;
 use crate::pair::EMLPair;
 
-const OVERFLOW_THRESHOLD: f64 = 709.78;
+// Must match Python's eml_math.constants.OVERFLOW_THRESHOLD == f64::MAX.ln().
+// The old rounded-down literal 709.78 made Rust clamp on x in
+// (709.78, 709.782712893384] where Python did not, diverging by ~1e308.
+const OVERFLOW_THRESHOLD: f64 = 709.782712893384;
+
+/// Frame-shift guard, byte-for-byte equivalent to Python's
+/// `y_safe = abs(y) if y <= 0 else y; if y_safe == 0: y_safe = 1e-300`.
+/// NOTE: the 1e-300 floor applies only to *zero*; `.max(1e-300)` would also
+/// crush legitimate negative subnormals (e.g. y = -1e-320) up to 1e-300.
+#[inline]
+fn y_guard(y: f64) -> f64 {
+    let a = if y <= 0.0 { y.abs() } else { y };
+    if a == 0.0 { 1e-300 } else { a }
+}
 
 #[pyclass(module = "eml_core")]
 #[derive(Clone, Debug)]
@@ -21,11 +34,7 @@ impl EMLPoint {
 
     pub fn tension(&self) -> f64 {
         let xv = if self.x > OVERFLOW_THRESHOLD { self.x.ln() } else { self.x };
-        let y_safe = if self.y <= 0.0 {
-            self.y.abs().max(1e-300)
-        } else {
-            self.y
-        };
+        let y_safe = y_guard(self.y);
         xv.exp() - y_safe.ln()
     }
 
@@ -36,11 +45,7 @@ impl EMLPoint {
 
     pub fn mirror_pulse(&self) -> EMLPoint {
         let xv = if self.x > OVERFLOW_THRESHOLD { self.x.ln() } else { self.x };
-        let y_safe = if self.y <= 0.0 {
-            self.y.abs().max(1e-300)
-        } else {
-            self.y
-        };
+        let y_safe = y_guard(self.y);
         let t = xv.exp() - y_safe.ln();
         EMLPoint { x: y_safe, y: t }
     }
@@ -67,7 +72,7 @@ impl EMLPoint {
         if !exp_x.is_finite() {
             return true;
         }
-        let y_safe = if next.y <= 0.0 { next.y.abs().max(1e-300) } else { next.y };
+        let y_safe = y_guard(next.y);
         let t = exp_x - y_safe.ln();
         (t + y_safe.ln() - exp_x).abs() < tol
     }

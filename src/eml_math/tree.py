@@ -1364,6 +1364,11 @@ def _literal_value(node: ast.expr) -> Any:
 
 def _fmt_num(v: Any) -> str:
     if not isinstance(v, (int, float)): return str(v)
+    # inf/NaN must be caught before any int() conversion below: the
+    # `v == int(v)` test runs before the `abs(v) < 1e6` guard, so a literal
+    # like 1e400 (which Python parses to inf) raised OverflowError and
+    # escaped parse_eml_tree, which only catches SyntaxError.
+    if isinstance(v, float) and not math.isfinite(v): return str(v)
     if v == math.pi:  return "π"
     if v == math.e:   return "e"
     if isinstance(v, int) or (isinstance(v, float) and v == int(v) and abs(v) < 1e6):

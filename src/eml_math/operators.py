@@ -30,6 +30,7 @@ from __future__ import annotations
 import math
 from typing import Union
 
+from eml_math.constants import OVERFLOW_THRESHOLD
 from eml_math.point import EMLPoint, _LitNode, _VarNode
 
 _Arg = Union[float, EMLPoint]
@@ -78,7 +79,7 @@ def ln(x: _Arg) -> TensionPoint:
     """
     inner1 = EMLPoint(_LitNode(1.0), _t(x))          # eml(1, x) = e - ln(x)
     inner2 = EMLPoint(inner1, _LitNode(1.0))          # eml(above, 1) = exp(e-ln(x))
-    return EMLPoint(_LitNode(1.0), inner2)             # eml(1, above) = e - ln(exp(e-ln(x)))
+    return _LnChainNode(_LitNode(1.0), inner2)         # eml(1, above) = e - ln(exp(e-ln(x)))
                                                            #               = e - (e - ln(x)) = ln(x)
 
 
@@ -536,6 +537,39 @@ def quantize(T: float, D: float) -> int:
 
 
 # ── Helper nodes (practical placeholders, pending Table-1 EML derivations) ────
+
+class _LnChainNode(EMLPoint):
+    """
+    Outer node of the depth-3 ``ln`` chain: ``eml(1, exp(e - ln(x)))``.
+
+    Structurally identical to a plain EMLPoint (same ``_x``/``_y`` children,
+    same ``repr``, same ``is_leaf``/``left``/``right``) so tree walkers are
+    unaffected. It only overrides ``tension()`` to stay correct when the
+    *intermediate* ``exp(e - ln(x))`` exceeds DBL_MAX.
+
+    That happens for ``0 < x < ~1.1e-307``: ``e - ln(x)`` then exceeds
+    OVERFLOW_THRESHOLD, the Slipping-Wheel clamp inside ``EMLPoint.tension``
+    rewrites it as ``ln(e - ln(x))``, and the outer ``e - ln(...)`` no longer
+    cancels — ``ln(1e-320)`` came back as ``-3.888`` instead of ``-736.827``.
+    Since the chain is analytically ``e - ln(exp(t)) == e - t``, we evaluate
+    that closed form directly when ``exp(t)`` is not representable.
+    """
+
+    __slots__ = ()
+
+    def tension(self) -> float:
+        inner2 = self._y
+        inner1 = inner2._x if isinstance(inner2, EMLPoint) else None
+        if isinstance(inner1, EMLPoint):
+            t = inner1.tension()          # t = e - ln(x); evaluated once
+            if t > OVERFLOW_THRESHOLD:
+                # exp(t) overflows; e - ln(exp(t)) == e - t exactly.
+                return math.e - t
+            # Same arithmetic the generic path would do, without re-walking
+            # the subtree: exp(1) - ln(exp(t) - ln(1)).
+            return math.exp(1.0) - math.log(math.exp(t))
+        return super().tension()
+
 
 class _DivNode(EMLPoint):
     """
