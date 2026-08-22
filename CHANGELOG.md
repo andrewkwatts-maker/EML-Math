@@ -2,6 +2,66 @@
 
 ---
 
+## [2.3.0] - 2026-08-22
+
+### Fixed — numeric core
+
+- **`ln()` was catastrophically wrong below the normal range.** The depth-3
+  chain evaluates `exp(e - ln x)` internally; once `x < ~1.1e-307` that exceeds
+  `DBL_MAX`, the Slipping-Wheel clamp rewrites the exponent, and the outer
+  cancellation no longer holds:
+
+      ops.ln(1e-320)        ->  -3.8878     (correct: -736.827)
+      ops.mul(1e-320, 1e10) ->   2.05e8     (correct:  9.9999e-311)
+
+  `_LnChainNode` evaluates the analytically-equal closed form `e - t` whenever
+  `exp(t)` is unrepresentable, keeping identical children/`repr`/`is_leaf` so
+  tree walkers are unaffected. Normal range is bit-identical; the subnormal
+  result now matches plain float arithmetic exactly.
+
+- **Rust and Python numeric cores had drifted**, so the same `EMLPoint` gave
+  different answers depending on whether it evaluated as a leaf (Rust) or from
+  `_LitNode`s (Python). `OVERFLOW_THRESHOLD` was the rounded literal `709.78`
+  rather than `f64::MAX.ln() = 709.782712893384`, and the frame-shift guard
+  used `abs(y).max(1e-300)`, crushing every negative subnormal instead of
+  flooring only exact zero. 6 of 10 probe cases diverged before; 0 after.
+  Requires a rebuild of the Rust extension.
+
+- **Unbounded trial division in `is_prime_tension`.** The sympy-less fallback
+  had no iteration cap; at the module's own documented scale `D ~ 6.19e34` it
+  needs 1.24e17 iterations — roughly 395 years, uninterruptible. Now capped at
+  `n <= 1e18` with a clear error. Also guards `round()` against inf/NaN.
+
+- `_fmt_num` crashed on non-finite literals: `v == int(v)` is evaluated before
+  the magnitude guard, and the parser only catches `SyntaxError`.
+- The sign-aware `ops` shim skipped `inv`, so `ops.div(1, -2)` and
+  `ops.inv(-2)` disagreed on sign within one class.
+- `compress.py` labelled `cosh_1` as `"sinh(1)"` — the value was right, the
+  rendered LaTeX was wrong and indistinguishable from `sinh_1`.
+
+### Changed
+
+- Stopped tracking a compiled `.pyc`. A stale one whose `(mtime, size)` matched
+  a fresh source edit was served instead of the edit, producing a phantom test
+  failure that survived a correct fix.
+
+### Tests
+
+- 2199 -> 2249 passing (50 new edge-case tests covering subnormals, exact
+  zeros, non-finite literals, and Rust/Python parity).
+
+### Documented, not changed — these are by design
+
+- Sign loss in `mul`/`div`/`pow`/`sqrt` for negatives (`ops.mul(-3, 4) = +12`)
+  follows from the documented frame-shift guard; `_SignedOps` is the intended
+  escape hatch, which is why the `inv` hole in it *was* fixed.
+- Slipping Wheel through the operator layer (`ops.exp(1000) = 1000.0`) is
+  documented behaviour, load-bearing for `iterate()`'s orbit bounding.
+- Zero does not survive ln-based ops (`mul(0, 5) = 5e-300`). Worth a design
+  decision, not silently altered.
+
+---
+
 ## [2.0.1] — 2026-05-17
 
 ### Added
