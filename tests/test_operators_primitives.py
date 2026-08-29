@@ -149,3 +149,61 @@ def test_context_cannot_shadow_the_dsl():
     )
     assert ev.eval("EML: ops.add(eml_scalar(1.0), eml_scalar(2.0))") == pytest.approx(3.0)
     assert ev.eval("EML: ops.mul(b3, eml_scalar(2.0))") == pytest.approx(48.0)
+
+
+# ── variadic arity and trailing-prose tolerance ─────────────────────────────
+
+
+def test_mul_and_add_accept_more_than_two_operands():
+    """Multiplication and addition are associative; the 2-arg signature was
+    an implementation limit that read as 'expression failed to evaluate'."""
+    from eml_math.evaluator import EMLEvaluator
+
+    ev = EMLEvaluator({}, strict=False)
+    assert ev.eval(
+        "EML: ops.mul(eml_scalar(2.0), eml_scalar(3.0), eml_scalar(4.0))"
+    ) == pytest.approx(24.0)
+    assert ev.eval(
+        "EML: ops.add(eml_scalar(1.0), eml_scalar(2.0), eml_scalar(3.0))"
+    ) == pytest.approx(6.0)
+
+
+def test_two_operand_calls_are_unchanged():
+    from eml_math.evaluator import EMLEvaluator
+
+    ev = EMLEvaluator({}, strict=False)
+    assert ev.eval("EML: ops.mul(eml_scalar(-2.0), eml_scalar(3.0))") == pytest.approx(-6.0)
+
+
+@pytest.mark.parametrize("tail", [
+    " = -23/24 ≈ -0.9583",
+    " where a1=ops.div(eml_scalar(1.0), eml_scalar(2.0))",
+    " at z=0",
+])
+def test_trailing_prose_is_stripped(tail):
+    """Only an em-dash tail used to be removed, so these annotations reached
+    the parser and failed as 'invalid syntax' / 'invalid character'."""
+    from eml_math.evaluator import EMLEvaluator
+
+    ev = EMLEvaluator({}, strict=False)
+    expr = "EML: ops.add(eml_scalar(1.0), eml_scalar(2.0))" + tail
+    assert ev.eval(expr) == pytest.approx(3.0)
+
+
+def test_a_genuinely_broken_expression_still_reports_its_error():
+    """Truncation must not turn a real syntax error into a silent partial
+    evaluation -- if no prefix parses, the original error surfaces."""
+    from eml_math.evaluator import EMLEvaluator, ParseError
+
+    ev = EMLEvaluator({}, strict=False)
+    with pytest.raises((ParseError, SyntaxError)):
+        ev.eval("EML: ops.add(((")
+
+
+def test_commas_inside_a_call_are_not_split_points():
+    from eml_math.evaluator import EMLEvaluator
+
+    ev = EMLEvaluator({}, strict=False)
+    assert ev.eval(
+        "EML: ops.div(ops.add(eml_scalar(4.0), eml_scalar(2.0)), eml_scalar(3.0)) trailing junk"
+    ) == pytest.approx(2.0)

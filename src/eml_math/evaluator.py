@@ -28,6 +28,7 @@ Example::
 """
 from __future__ import annotations
 
+import ast
 import math
 import re
 from typing import Any, Dict, Optional
@@ -80,6 +81,48 @@ class _NormalisingNamespace(dict):
             return self._normalised[_normalise_name(key)]
         except (KeyError, TypeError):
             raise KeyError(key) from None
+
+
+def _longest_valid_expression(s: str) -> str:
+    """Longest leading substring of *s* that parses as a Python expression.
+
+    Returns *s* unchanged when it already parses, or when no prefix does --
+    in the latter case the caller surfaces the genuine syntax error instead
+    of a silently truncated fragment, which would be worse than failing.
+    """
+    if not s:
+        return s
+    try:
+        ast.parse(s, mode="eval")
+        return s
+    except SyntaxError:
+        pass
+
+    # Candidate cut points: positions at bracket depth 0, longest first.
+    cuts: list[int] = []
+    depth = 0
+    in_str: str | None = None
+    for i, ch in enumerate(s):
+        if in_str:
+            if ch == in_str:
+                in_str = None
+            continue
+        if ch in "'\"":
+            in_str = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+            if depth == 0:
+                cuts.append(i + 1)
+    for end in reversed(cuts):
+        candidate = s[:end].strip()
+        try:
+            ast.parse(candidate, mode="eval")
+            return candidate
+        except SyntaxError:
+            continue
+    return s
 
 
 def _normalise_name(name: str) -> str:
@@ -181,7 +224,27 @@ class EMLEvaluator:
 
     @staticmethod
     def _parse(eml_description: str) -> str:
-        """Extract the Python expression from an eml_description string."""
+        """Extract the Python expression from an eml_description string.
+
+        The commentary tail is separated from the expression by an em-dash
+        in most entries, but not all: some append prose with other
+        punctuation, e.g.
+
+            EML: ops.add(...) = -23/24 ≈ -0.9583
+            EML: ops.div(...) where a1=ops.div(...)
+            EML: ops.div(...) at z=0
+
+        Splitting on dashes alone left that tail attached, and the whole
+        entry failed with "invalid syntax" or "invalid character '≈'" --
+        reported as a broken expression when the expression itself was fine
+        and only its annotation was in the way.
+
+        So after the dash split, take the LONGEST leading substring that is
+        a valid Python expression. Cuts are only attempted at bracket depth
+        zero, so a comma or space inside a call is never a split point. If
+        no prefix parses, the original string is returned unchanged and the
+        caller reports the real syntax error rather than a truncation.
+        """
         s = eml_description.strip()
         if not s.startswith(_PREFIX):
             raise ParseError(
@@ -193,7 +256,8 @@ class EMLEvaluator:
         for sep in (" — ", " – ", " -- "):
             if sep in s:
                 s = s.split(sep, 1)[0]
-        return s.strip()
+        s = s.strip()
+        return _longest_valid_expression(s)
 
     def _eml_vec(self, name: str) -> float:
         """Context-bound eml_vec resolver. Returns a plain float.
@@ -289,13 +353,42 @@ class _SignedOpsMeta(type):
 
 class _SignedOps(metaclass=_SignedOpsMeta):
     @staticmethod
-    def mul(a: Any, b: Any) -> float:
+    def mul(a: Any, b: Any, *rest: Any) -> float:
+        """Product of two OR MORE operands.
+
+        Multiplication is associative, and expression authors write it that
+        way -- ``ops.mul(x, y, z)``. The two-argument signature rejected
+        those with "mul() takes 2 positional arguments but 3 were given",
+        which the cross-check recorded as an expression that failed to
+        evaluate rather than as a call the shim could not accept.
+        Folding left keeps the sign handling below unchanged.
+        """
+        result = _SignedOps._mul2(a, b)
+        for operand in rest:
+            result = _SignedOps._mul2(result, operand)
+        return result
+
+    @staticmethod
+    def _mul2(a: Any, b: Any) -> float:
         af, bf = _to_float(a), _to_float(b)
         if af == 0.0 or bf == 0.0:
             return 0.0
         sign = (1 if af > 0 else -1) * (1 if bf > 0 else -1)
         magnitude = ops.mul(abs(af), abs(bf))
         return sign * _to_float(magnitude)
+
+    @staticmethod
+    def add(a: Any, b: Any, *rest: Any) -> float:
+        """Sum of two OR MORE operands, for the same reason as mul.
+
+        ``ops.add(x, y, z)`` appears in registry expressions; addition is
+        associative and the arity limit was an implementation detail, not a
+        statement about the algebra.
+        """
+        total = _to_float(ops.add(a, b))
+        for operand in rest:
+            total = _to_float(ops.add(total, operand))
+        return total
 
     @staticmethod
     def div(a: Any, b: Any) -> float:
