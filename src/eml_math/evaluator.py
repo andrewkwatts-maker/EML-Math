@@ -41,6 +41,62 @@ __all__ = ["EMLEvaluator", "eml_eval", "ParseError"]
 _SEP = " — "
 _PREFIX = "EML: "
 
+
+class _NormalisingNamespace(dict):
+    """Evaluation namespace that falls back to a case/underscore-blind match.
+
+    Expression authors and value registries spell the same quantity
+    differently -- ``Vcb`` vs ``V_cb``, ``M_Planck`` vs ``M_PLANCK``,
+    ``alpha_GUT_inv`` vs ``ALPHA_GUT_INV``, ``M_KK`` vs ``m_KK``. Every one
+    of those raised NameError and was recorded as an expression that "did not
+    evaluate", when the only difference was capitalisation.
+
+    Exact spellings always win. The normalised fallback resolves a name ONLY
+    when every candidate sharing its normalised form carries the same value;
+    where two genuinely different quantities collide, the lookup fails as
+    before. Guessing there would score an expression against the wrong
+    number, which is worse than not evaluating it.
+
+    Implemented via ``__missing__``, which CPython consults for a dict
+    subclass used as the *globals* mapping of ``eval``.
+    """
+
+    __slots__ = ("_normalised",)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        buckets: Dict[str, list] = {}
+        for key, value in self.items():
+            buckets.setdefault(_normalise_name(key), []).append(value)
+        # Keep only unambiguous buckets: one distinct value.
+        self._normalised = {}
+        for norm, values in buckets.items():
+            distinct = {_hashable(v) for v in values}
+            if len(distinct) == 1:
+                self._normalised[norm] = values[0]
+
+    def __missing__(self, key: str):
+        try:
+            return self._normalised[_normalise_name(key)]
+        except (KeyError, TypeError):
+            raise KeyError(key) from None
+
+
+def _normalise_name(name: str) -> str:
+    """Spelling-insensitive key: drop underscores, fold case."""
+    return name.replace("_", "").lower() if isinstance(name, str) else name
+
+
+def _hashable(value):
+    """Round floats so 1.0 and 1.0000000000001 do not read as a collision."""
+    if isinstance(value, float):
+        return round(value, 12)
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return id(value)
+
 # Regex that strips the prefix and optional description tail.
 _EXPR_RE = re.compile(r"^EML:\s*(.*?)(?:\s+[—–-]{1,3}\s+.*)?$", re.DOTALL)
 
@@ -165,8 +221,28 @@ class EMLEvaluator:
         self.missing_refs.append(name)
         return 0.0
 
+    #: Namespace entries that define the DSL itself. Context values may never
+    #: shadow these -- a registry parameter innocently named "math" or "ops"
+    #: would otherwise break every expression at once.
+    _RESERVED = ("ops", "math", "eml_scalar", "eml_pi", "eml_vec")
+
+    #: Exposed for tests: the namespace mapping type used for evaluation.
+    _namespace_type = staticmethod(lambda ctx: _NormalisingNamespace(ctx))
+
     def _namespace(self) -> dict:
-        return {
+        # Context values are exposed as BARE NAMES as well as through
+        # eml_vec(). Expressions are written both ways --
+        #   ops.mul(ops.div(b3, chi_eff), ...)          <- bare
+        #   ops.mul(ops.div(eml_vec('b3'), ...), ...)   <- explicit
+        # -- and only the second used to resolve, so the first raised
+        # NameError and was recorded as "did not evaluate". That misreads a
+        # naming convention as a broken expression: 66 downstream parameters
+        # were counted as failures with nothing actually wrong with them.
+        # The context exists to supply exactly these values (see the callers'
+        # _build_context), so it belongs in the namespace.
+        ns = _NormalisingNamespace(self.context)
+        # Reserved names are written last so they always win.
+        ns.update({
             # Sign-aware ops shim — keeps the log-space EML algebra pure
             # internally but extracts and re-applies sign at the operator
             # boundary so expressions like ops.mul(ops.neg(...), x) give
@@ -178,7 +254,8 @@ class EMLEvaluator:
             "eml_scalar": float,
             "eml_pi": lambda: math.pi,
             "eml_vec": self._eml_vec,
-        }
+        })
+        return ns
 
 
 # ---------------------------------------------------------------------------

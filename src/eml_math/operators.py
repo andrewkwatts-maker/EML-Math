@@ -35,6 +35,16 @@ from eml_math.point import EMLPoint, _LitNode, _VarNode
 
 _Arg = Union[float, EMLPoint]
 
+# Builtins captured before the alias block at the end of this module shadows
+# them. Without this, `abs = abs_fn` would make abs_fn's own `abs(...)` call
+# resolve back to abs_fn -- infinite recursion, and the same trap for
+# sum/max/min. Module globals shadow builtins at CALL time, not def time, so
+# capturing here is what makes the shadowing safe.
+_builtin_abs = abs
+_builtin_sum = sum
+_builtin_max = max
+_builtin_min = min
+
 
 def _t(v: _Arg) -> EMLPoint:
     """Coerce a float or EMLPoint to an EMLPoint node."""
@@ -482,7 +492,7 @@ def sum_n(term: _Arg, n_start: _Arg, n_end: _Arg) -> TensionPoint:
     tv = _t(term).tension()
     ns = int(round(_t(n_start).tension()))
     ne = int(round(_t(n_end).tension()))
-    count = max(ne - ns + 1, 1)
+    count = _builtin_max(ne - ns + 1, 1)
     return _LitNode(tv * count)
 
 
@@ -490,14 +500,93 @@ def sum_n(term: _Arg, n_start: _Arg, n_end: _Arg) -> TensionPoint:
 
 def mirror_abs(x: float) -> float:
     """
-    abs(x) — the only non-EML primitive.
+    abs(x) — the original non-EML primitive.
 
-    Used exclusively in the frame-shift guard: y_safe = mirror_abs(y) when y ≤ 0.
+    Used in the frame-shift guard: y_safe = mirror_abs(y) when y ≤ 0.
     Returns a plain float, not a EMLPoint.
 
     Cannot be expressed as eml(a, b) — requires a conditional on sign.
     """
-    return abs(x)
+    return _builtin_abs(x)
+
+
+def _val(x: _Arg) -> float:
+    """Numeric value of a float or an EMLPoint, for the primitives below."""
+    if isinstance(x, EMLPoint):
+        return float(x.tension())
+    return float(x)
+
+
+def abs_fn(x: _Arg) -> float:
+    """
+    |x| — non-EML primitive (same reason as mirror_abs: needs a sign test).
+
+    Exposed as ``ops.abs`` because that is the name expression authors
+    reach for. Twenty registry expressions called ``ops.abs`` and got
+    ``AttributeError``, which the cross-check recorded as "did not
+    evaluate" — the expressions were right, the operator was simply absent.
+    """
+    return _builtin_abs(_val(x))
+
+
+def sum_fn(*xs: _Arg) -> float:
+    """
+    Variadic sum — non-EML (arity is unbounded; ``add`` is the EML form).
+
+    Returns a plain float rather than a nested add-chain so that callers
+    summing a long list do not build a deep tree whose tension is then
+    recomputed at every level.
+    """
+    return float(_builtin_sum(_val(x) for x in xs))
+
+
+def max_fn(*xs: _Arg) -> float:
+    """max(...) — non-EML primitive: selection requires a comparison."""
+    if not xs:
+        raise ValueError("max() requires at least one argument")
+    return _builtin_max(_val(x) for x in xs)
+
+
+def min_fn(*xs: _Arg) -> float:
+    """min(...) — the companion to max_fn, same non-EML reasoning."""
+    if not xs:
+        raise ValueError("min() requires at least one argument")
+    return _builtin_min(_val(x) for x in xs)
+
+
+def log10_fn(x: _Arg) -> float:
+    """
+    log base 10 — non-EML at this level.
+
+    ``log_fn(10, x)`` is the EML composition; this is the convenience name
+    expressions actually use, and it delegates so the two cannot drift.
+    """
+    return float(log_fn(10.0, _t(_val(x))).tension())
+
+
+def gt(a: _Arg, b: _Arg) -> bool:
+    """a > b — non-EML primitive: a comparison is not a tension composition."""
+    return _val(a) > _val(b)
+
+
+def lt(a: _Arg, b: _Arg) -> bool:
+    """a < b — companion to gt."""
+    return _val(a) < _val(b)
+
+
+def and_(*xs) -> bool:
+    """
+    Logical AND — non-EML primitive.
+
+    Named with a trailing underscore because ``and`` is a Python keyword;
+    this matches the convention already used by expression authors.
+    """
+    return all(bool(x) for x in xs)
+
+
+def or_(*xs) -> bool:
+    """Logical OR — companion to and_."""
+    return any(bool(x) for x in xs)
 
 
 # ── Literal constructors (for use in eml_description eval namespaces) ─────────
@@ -683,3 +772,25 @@ class _NegNode(EMLPoint):
 
     def __repr__(self) -> str:
         return f"_NegNode({self._inner!r})"
+
+
+# ── Builtin-shadowing aliases (MUST stay last in this module) ─────────────────
+#
+# These shadow Python builtins inside this module's namespace so expression
+# authors can write ops.abs / ops.sum / ops.max. Everything above that needs
+# the real builtins uses the _builtin_* captures made at the top of the file,
+# so placing these last is what keeps that safe. Adding a new use of a bare
+# abs/sum/max/min BELOW this line would silently pick up these instead.
+
+#: ops.abs(x) — absolute value (non-EML primitive).
+abs = abs_fn        # noqa: A001
+
+#: ops.sum(*xs) — variadic sum.
+sum = sum_fn        # noqa: A001
+
+#: ops.max(*xs) / ops.min(*xs) — selection primitives.
+max = max_fn        # noqa: A001
+min = min_fn        # noqa: A001
+
+#: ops.log10(x) — base-10 logarithm.
+log10 = log10_fn
