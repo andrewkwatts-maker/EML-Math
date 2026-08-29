@@ -42,6 +42,9 @@ __all__ = ["EMLEvaluator", "eml_eval", "ParseError"]
 _SEP = " — "
 _PREFIX = "EML: "
 
+#: Sentinel distinguishing "absent" from a legitimately stored None/0.
+_MISSING = object()
+
 
 class _NormalisingNamespace(dict):
     """Evaluation namespace that falls back to a case/underscore-blind match.
@@ -172,6 +175,26 @@ class EMLEvaluator:
         self.context = {k: v for k, v in context.items() if v is not None}
         self.strict = strict
         self.missing_refs: list[str] = []
+        self._norm_cache: Optional[Dict[str, Any]] = None
+
+    def _normalised_context(self) -> Dict[str, Any]:
+        """Case/underscore-blind view of the context, unambiguous entries only.
+
+        Built once per evaluator. Shares its rule with
+        :class:`_NormalisingNamespace`: a normalised key resolves only when
+        every candidate carrying it agrees on a value, so a genuine
+        collision stays unresolved rather than being decided arbitrarily.
+        """
+        if self._norm_cache is None:
+            buckets: Dict[str, list] = {}
+            for key, value in self.context.items():
+                buckets.setdefault(_normalise_name(key), []).append(value)
+            self._norm_cache = {
+                norm: values[0]
+                for norm, values in buckets.items()
+                if len({_hashable(v) for v in values}) == 1
+            }
+        return self._norm_cache
 
     # ------------------------------------------------------------------
     # Public API
@@ -266,8 +289,17 @@ class EMLEvaluator:
         _ScaleNode path rather than the exp(mul(n, ln(base))) path, which
         breaks for base < 1 when n is a TensionPoint.
         """
-        if name in self.context:
-            val = self.context[name]
+        # Exact match first, then the SAME case/underscore-blind fallback the
+        # bare-name namespace uses. Without this the two ways of referring to
+        # one value resolved by different rules: `M_Planck` worked as a bare
+        # name but eml_vec('M_Planck') did not, and under strict=False that
+        # silently yielded 0.0 -- an expression evaluated with a wrong number
+        # and then reported as disagreeing with the registry, which reads as
+        # a physics discrepancy rather than an unresolved reference.
+        val = self.context.get(name, _MISSING)
+        if val is _MISSING:
+            val = self._normalised_context().get(_normalise_name(name), _MISSING)
+        if val is not _MISSING:
             try:
                 return float(val)
             except (TypeError, ValueError):
