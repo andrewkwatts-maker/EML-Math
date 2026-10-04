@@ -1,3 +1,8 @@
 [workspace]
 members = ["rust/eml_core", "c_api"]
 resolver = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

@@ -82,7 +82,7 @@ Documentation = "https://github.com/andrewkwatts-maker/EML-Math/blob/main/README
 python-source = "src"
 manifest-path = "rust/eml_core/Cargo.toml"
 module-name = "eml_math.eml_core"
-features = ["pyo3/extension-module"]
+features = ["extension-module"]
 include = [
     "src/eml_math/web/eml_flow.js",
 ]

@@ -1,6 +1,6 @@
-﻿[package]
+[package]
 name = "eml_core"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2021"
 
 [lib]
@@ -8,31 +8,36 @@ name = "eml_core"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["python"]
-# Python bindings (PyO3 extension module). Enabled by default so PyPI builds
-# (maturin / pip install) keep working unchanged.
+# `python` builds the PyO3 bindings and links against libpython, which is what
+# `cargo test` needs: a test binary must resolve the CPython symbols itself.
 #
-# NOTE: while `python` is technically optional, the source uses bare `#[pyclass]`,
-# `#[pymethods]`, `#[new]`, `#[pyo3(get)]` attributes (not cfg_attr-gated) so the
-# `--no-default-features` build does not currently compile cleanly. The engine
-# never hits that path â€” `pt-eml-bridge` consumes `eml_core` with
-# `optional = true, default-features = false` and is itself gated behind the
-# `with-eml` feature flag which is off by default. When `with-eml` is enabled,
-# the engine accepts pyo3 as a transitive dep (which is fine on Windows builds
-# now that Build.bat sets `PYO3_PYTHON`). A future Wave 3 cleanup could apply
-# the dual-impl pattern (inherent impl + gated `#[pymethods]` impl) to make
-# `--no-default-features` build cleanly, but the cost is ~50 duplicated method
-# bodies across 7 source files and the benefit is marginal â€” see
-# `docs/integration/WAVE2_STATUS.md` follow-up #5.
-python = ["pyo3"]
+# `extension-module` additionally tells PyO3 to leave those symbols undefined so
+# the shared object can be loaded into an interpreter that already provides
+# them. ONLY the wheel build (maturin) may turn this on. Folding it into
+# `python` -- as this crate previously did, by hard-coding
+# `features = ["extension-module"]` on the dependency -- means every
+# `#[cfg(test)]` test in the bindings fails to link on Linux and macOS, so the
+# tests silently never run. That was a real defect here.
+#
+# `default` is empty, and that is load-bearing: `eml_core` is a Rust library
+# first and must build, test and be depended on with no Python interpreter
+# anywhere. It briefly could not -- ~71 ungated `pyo3` references ran through
+# `lib.rs`, `knot.rs`, `metric.rs`, `multivector.rs`, `octonion.rs`, `pair.rs`
+# and `point.rs`, so emptying this list was an immediate compile error.
+#
+# What that turned up: every *public* item in the crate was a `#[pyfunction]`.
+# The core modules were private, so with the feature off there was no Rust API
+# at all. The batch entry points now return `Result<_, InputError>` rather than
+# `PyResult`, a single `impl From<InputError> for PyErr` converts at the
+# boundary, and the core modules are `pub`.
+default = []
+
+python = ["dep:pyo3"]
+extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.22", optional = true }
 rayon = "1.10"
 dashmap = "6"
-ordered-float = "4"
 
-[profile.release]
-lto = true
-codegen-units = 1
-opt-level = 3
+[dev-dependencies]
